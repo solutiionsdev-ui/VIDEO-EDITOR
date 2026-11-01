@@ -15,6 +15,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from ..job import Job, console, fmt_time
+from ..media import decode_audio
 from ..profile import get
 from ..text import preview
 
@@ -50,7 +51,8 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 200},
         condition_on_previous_text=False,   # retakes repeat lines; don't let Whisper "correct" them away
-        initial_prompt=", ".join(vocabulary) if vocabulary else None,
+        initial_prompt=_prompt(vocabulary),
+        hotwords=_prompt(vocabulary),       # re-applied to every 30 s window (initial_prompt is not)
     )
     if multilingual and "multilingual" in inspect.signature(model.transcribe).parameters:
         kwargs["multilingual"] = True
@@ -61,7 +63,9 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
         wav = job.path / src["wav"]
         duration = float(src["duration"])
         segments_out = []
-        segments, info = model.transcribe(str(wav), **kwargs)
+        # Decode with our own ffmpeg and pass samples: avoids faster-whisper's PyAV decoder.
+        samples = decode_audio(wav, 16000)
+        segments, info = model.transcribe(samples, **kwargs)
         with Progress(TextColumn("  transcribing {task.fields[name]}"), BarColumn(), TextColumn("{task.percentage:>3.0f}%"),
                       TimeElapsedColumn(), console=console, transient=True) as progress:
             task = progress.add_task("t", total=duration, name=src["file"])
@@ -116,6 +120,14 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
 
 
 MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "models"
+
+
+def _prompt(vocabulary: list[str]) -> str:
+    """A punctuated prompt keeps Whisper punctuating (it tends to stop mid-file otherwise)
+    and introduces the client's names so they are spelled right."""
+    names = ", ".join(vocabulary)
+    base = "Okay, let's start. This is the first sentence, and this is the second one."
+    return f"{base} We also mention {names}." if names else base
 
 
 def _local_model(name: str) -> str | None:

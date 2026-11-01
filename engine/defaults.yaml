@@ -10,6 +10,7 @@ editing:
   breath: 0.12               # seconds of natural pause kept at every cut
   sentence_breath: 0.18      # a little longer when the cut falls at the end of a sentence
   max_pause: 0.45            # pauses longer than this get shortened to `breath`
+  silence_db_over_floor: 8   # a pause = audio this many dB (or less) above the room noise
   min_cut: 0.12              # don't bother cutting less than this
   pre_pad: 0.15              # seconds kept before the first word of a segment
   post_pad: 0.20             # seconds kept after the last word of a segment

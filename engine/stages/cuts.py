@@ -1,13 +1,23 @@
 """Stage 5 — cut silences.
 
 Turns the kept takes into an edit list: which pieces of the raw footage stay,
-in order. Dead air, long pauses and filler words are removed, a natural breath
-is kept at every cut, and a cut never lands inside a word.
+in order. Dead air, long pauses and filler words are removed and a natural
+breath is kept at every cut.
+
+Pauses are found in the audio itself (energy below the room level for longer
+than `max_pause`), not from the transcript: Whisper stretches each word's end
+time over the silence that follows it, so word gaps hide most pauses. A region
+that is quiet for half a second cannot contain a spoken word, which is how the
+"never cut mid-word" rule is kept. Word timestamps are only used to find
+fillers and rejected takes, and those cut points are snapped to the quietest
+moment nearby.
+
 Writes cuts.json and a low-res preview video (previews/cut-preview.mp4).
 """
 
 from __future__ import annotations
 
+import numpy as np
 from rich.table import Table
 
 from .. import audio_analysis as aa
@@ -18,6 +28,8 @@ from ..text import ends_sentence, is_filler, preview
 
 OUTPUT = "cuts.json"
 PREVIEW = "previews/cut-preview.mp4"
+MIN_SEGMENT = 0.25          # kept pieces shorter than this are not worth a cut
+WORDLESS_KEEP = 1.0         # a stretch with no words is kept only if it is at least this long
 
 
 def run(job: Job, profile: dict, show: bool = False, preview_video: bool = True) -> dict:
@@ -31,6 +43,7 @@ def run(job: Job, profile: dict, show: bool = False, preview_video: bool = True)
     pre_pad = float(e.get("pre_pad", 0.15))
     post_pad = float(e.get("post_pad", 0.20))
     remove_fillers = bool(e.get("remove_fillers", True))
+    silence_db_over_floor = float(get(profile, "editing.silence_db_over_floor", 8))
 
     units_by_source: dict[int, list[dict]] = {}
     for u in takes["units"]:
@@ -43,111 +56,84 @@ def run(job: Job, profile: dict, show: bool = False, preview_video: bool = True)
         si = src["index"]
         duration = float(src["duration"])
         total_in += duration
-        env = aa.envelope(decode_audio(job.path / src["wav"], 16000), 16000)
+        samples = decode_audio(job.path / src["wav"], 16000)
+        env = aa.envelope(samples, 16000)
+        stats = aa.analyse(samples, 16000, env)
+        threshold = stats.noise_floor_dbfs + max(silence_db_over_floor, 0.3 * stats.snr_db)
         units = sorted(units_by_source.get(si, []), key=lambda u: u["start"])
-        all_words = sorted((w for u in units for w in u["words"]), key=lambda w: w["start"])
+        kept_words = [w for u in units if u["kept"] for w in u["words"]]
+        kept_words.sort(key=lambda w: w["start"])
 
-        # 1. The words we keep, in order, grouped into runs that play without a cut.
-        runs: list[dict] = []
-        run_words: list[dict] = []
-        run_units: list[int] = []
-        removed_words: list[dict] = []   # words dropped inside kept lines (fillers)
+        cuts: list[dict] = []   # intervals to remove: start, end, kind, text
 
-        def close_run() -> None:
-            if run_words:
-                runs.append({"words": list(run_words), "units": list(run_units)})
-            run_words.clear()
-            run_units.clear()
-
-        last_kept_word: dict | None = None
+        # 1. Whole lines that lost to a better take (or were hallucinated).
         for u in units:
-            if not u["kept"]:
-                close_run()
+            if u["kept"]:
+                continue
+            kind = "suspect" if u["suspect"] else "rejected_take"
+            s = env.quietest(u["start"] - 0.3, u["start"] + 0.05) + breath / 2
+            t = env.quietest(u["end"] - 0.05, u["end"] + 0.3) - breath / 2
+            cuts.append(_cut(min(s, u["start"]), max(t, u["end"]), kind, u["text"]))
+
+        # 2. Filler words inside kept lines.
+        if remove_fillers:
+            for u in units:
+                if not u["kept"] or len(u["words"]) < 2:
+                    continue
                 for w in u["words"]:
-                    removed_words.append({**w, "kind": "rejected_take", "unit": u["id"]})
-                continue
-            for w in u["words"]:
-                if remove_fillers and is_filler(w["w"]) and len(u["words"]) > 1:
-                    close_run()
-                    removed_words.append({**w, "kind": "filler", "unit": u["id"]})
-                    continue
-                if last_kept_word is not None and run_words and (w["start"] - last_kept_word["end"]) > max_pause:
-                    close_run()
-                run_words.append(w)
-                if u["id"] not in run_units:
-                    run_units.append(u["id"])
-                last_kept_word = w
-        close_run()
+                    if is_filler(w["w"]):
+                        s = env.quietest(w["start"] - 0.15, w["start"] + 0.03)
+                        t = env.quietest(w["end"] - 0.03, w["end"] + 0.15)
+                        cuts.append(_cut(min(s, w["start"]), max(t, w["end"]), "filler", w["w"]))
 
-        # 2. Turn runs into keep-segments with safe, quiet cut points.
+        # 3. Pauses: stretches of near-silence longer than max_pause.
+        for a, b in _quiet_runs(env, threshold, max_pause):
+            if a <= 0.05:                                   # dead air before the first word
+                cuts.append(_cut(0.0, max(0.0, b - pre_pad), "lead", ""))
+            elif b >= duration - 0.05:                       # dead air after the last word
+                cuts.append(_cut(min(duration, a + post_pad), duration, "tail", ""))
+            else:
+                pad = sentence_breath if _ends_sentence_before(kept_words, a) else breath
+                if (b - a) - 2 * pad >= min_cut:
+                    cuts.append(_cut(a + pad, b - pad, "pause", ""))
+
+        merged = _merge(cuts, duration)
+
+        # 4. What stays is everything between the cuts — unless it is a short stretch with
+        #    no words in it (a breath or a noise between two pauses), which goes too.
+        src_segments: list[dict] = []
+        cursor = 0.0
+        for c in merged + [None]:
+            end = duration if c is None else c["start"]
+            has_words = any(cursor <= (w["start"] + w["end"]) / 2 <= end for w in kept_words)
+            if end - cursor >= MIN_SEGMENT and (has_words or end - cursor >= WORDLESS_KEEP):
+                src_segments.append({"source": si, "start": round(cursor, 3), "end": round(end, 3)})
+            if c is not None:
+                cursor = c["end"]
+        # Re-derive the removed list from the gaps between kept segments (so folded pieces are counted).
         prev_end = 0.0
-        for ri, r in enumerate(runs):
-            first, last = r["words"][0], r["words"][-1]
-            prev_word = _word_before(all_words, first["start"])
-            next_word = _word_after(all_words, last["end"])
+        src_removed: list[dict] = []
+        for seg in src_segments + [None]:
+            gap_start = prev_end
+            gap_end = duration if seg is None else seg["start"]
+            if gap_end - gap_start > 0.01:
+                inside = [c for c in merged if c["start"] < gap_end and c["end"] > gap_start]
+                kinds = {c["kind"] for c in inside}
+                kind = next((k for k in ("rejected_take", "suspect", "filler", "lead", "tail", "pause") if k in kinds), "pause")
+                src_removed.append({"source": si, "start": round(gap_start, 3), "end": round(gap_end, 3),
+                                    "duration": round(gap_end - gap_start, 3), "kind": kind,
+                                    "text": preview(" ".join(c["text"] for c in inside if c["text"]), 80)})
+            if seg is not None:
+                prev_end = seg["end"]
 
-            if ri == 0:
-                start = max(0.0, first["start"] - pre_pad)
-                if prev_word is not None:
-                    start = max(start, prev_word["end"] + 0.02)
-            else:
-                lo = first["start"] - pre_pad - 0.15
-                hi = first["start"] - breath
-                if prev_word is not None:
-                    lo = max(lo, prev_word["end"] + 0.02)
-                start = env.quietest(lo, hi) if hi > lo else max(lo, min(hi, first["start"] - 0.03))
-                start = max(start, prev_end + 0.01)
-
-            pause = sentence_breath if ends_sentence(last["w"]) else breath
-            if ri == len(runs) - 1:
-                end = min(duration, last["end"] + post_pad)
-                if next_word is not None:
-                    end = min(end, next_word["start"] - 0.02)
-            else:
-                lo = last["end"] + pause
-                hi = last["end"] + post_pad + 0.15
-                if next_word is not None:
-                    hi = min(hi, next_word["start"] - 0.02)
-                end = env.quietest(lo, hi) if hi > lo else max(last["end"] + 0.02, min(lo, hi))
-            end = max(end, last["end"] + 0.02)
-            start = _not_inside_word(all_words, start, push="earlier")
-            end = _not_inside_word(all_words, end, push="later")
-            end = min(end, duration)
-            if end <= start:
-                continue
-
-            seg = {"source": si, "start": round(start, 3), "end": round(end, 3), "words": r["words"], "units": r["units"]}
-
-            # Tiny pauses aren't worth a cut: merge with the previous segment unless words were removed between.
-            if segments and segments[-1]["source"] == si:
-                prev = segments[-1]
-                gap_words = [w for w in removed_words if prev["end"] <= w["start"] and w["end"] <= seg["start"] + 0.05]
-                if not gap_words and (seg["start"] - prev["end"]) < min_cut:
-                    prev["end"] = seg["end"]
-                    prev["words"] += seg["words"]
-                    prev["units"] += [x for x in seg["units"] if x not in prev["units"]]
-                    prev_end = prev["end"]
-                    continue
-                kinds = {w["kind"] for w in gap_words}
-                kind = "rejected_take" if "rejected_take" in kinds else ("filler" if "filler" in kinds else "pause")
-                removed.append({"source": si, "start": prev["end"], "end": seg["start"],
-                                "duration": round(seg["start"] - prev["end"], 3), "kind": kind,
-                                "text": preview(" ".join(w["w"] for w in gap_words), 80)})
-            elif start > 0:
-                lead_words = [w for w in removed_words if w["end"] <= start + 0.05]
-                removed.append({"source": si, "start": 0.0, "end": seg["start"], "duration": round(seg["start"], 3),
-                                "kind": "rejected_take" if lead_words else "lead",
-                                "text": preview(" ".join(w["w"] for w in lead_words), 80)})
-            segments.append(seg)
-            prev_end = seg["end"]
-
-        if segments and segments[-1]["source"] == si and segments[-1]["end"] < duration - 0.05:
-            tail_start = segments[-1]["end"]
-            tail_words = [w for w in removed_words if w["start"] >= tail_start - 0.05]
-            removed.append({"source": si, "start": tail_start, "end": round(duration, 3),
-                            "duration": round(duration - tail_start, 3),
-                            "kind": "rejected_take" if tail_words else "tail",
-                            "text": preview(" ".join(w["w"] for w in tail_words), 80)})
+        for seg in src_segments:
+            seg["words"] = [w for w in kept_words if seg["start"] <= (w["start"] + w["end"]) / 2 <= seg["end"]
+                            and not (remove_fillers and is_filler(w["w"]))]
+            seg["units"] = sorted({u["id"] for u in units if u["kept"]
+                                   for w in u["words"] if seg["start"] <= (w["start"] + w["end"]) / 2 <= seg["end"]})
+            seg["quiet_threshold_dbfs"] = round(threshold, 1)
+        segments.extend(src_segments)
+        removed.extend(src_removed)
 
     for i, s in enumerate(segments):
         s["id"] = i
@@ -165,7 +151,8 @@ def run(job: Job, profile: dict, show: bool = False, preview_video: bool = True)
 
     result = {
         "settings": {"breath": breath, "sentence_breath": sentence_breath, "max_pause": max_pause,
-                     "min_cut": min_cut, "pre_pad": pre_pad, "post_pad": post_pad, "remove_fillers": remove_fillers},
+                     "min_cut": min_cut, "pre_pad": pre_pad, "post_pad": post_pad, "remove_fillers": remove_fillers,
+                     "silence_db_over_floor": silence_db_over_floor},
         "segments": segments,
         "removed": removed,
         "script": " ".join(s["text"] for s in segments),
@@ -188,31 +175,59 @@ def run(job: Job, profile: dict, show: bool = False, preview_video: bool = True)
     return result
 
 
-def _word_before(words: list[dict], t: float) -> dict | None:
-    best = None
+def _cut(start: float, end: float, kind: str, text: str) -> dict:
+    return {"start": max(0.0, start), "end": end, "kind": kind, "text": text}
+
+
+def _quiet_runs(env: aa.Envelope, threshold: float, min_len: float) -> list[tuple[float, float]]:
+    """Stretches where the level stays under `threshold` for at least `min_len` seconds."""
+    quiet = env.db < threshold
+    runs: list[tuple[float, float]] = []
+    n = len(quiet)
+    i = 0
+    while i < n:
+        if not quiet[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and quiet[j]:
+            j += 1
+        a, b = float(env.times[i]), float(env.times[j - 1])
+        if b - a >= min_len:
+            runs.append((a, b))
+        i = j
+    return runs
+
+
+def _ends_sentence_before(words: list[dict], t: float) -> bool:
+    """Does the last word spoken before time t close a sentence?"""
+    last = None
     for w in words:
-        if w["end"] <= t + 1e-6:
-            best = w
-        elif w["start"] >= t:
+        if w["start"] < t:
+            last = w
+        else:
             break
-    return best
+    return bool(last) and ends_sentence(last["w"])
 
 
-def _word_after(words: list[dict], t: float) -> dict | None:
-    for w in words:
-        if w["start"] >= t - 1e-6:
-            return w
-    return None
-
-
-def _not_inside_word(words: list[dict], t: float, push: str) -> float:
-    """Never cut mid-word: move the cut point just outside any word it falls into."""
-    for w in words:
-        if w["start"] + 0.02 < t < w["end"] - 0.02:
-            return w["start"] - 0.02 if push == "earlier" else w["end"] + 0.02
-        if w["start"] > t + 1:
-            break
-    return t
+def _merge(cuts: list[dict], duration: float) -> list[dict]:
+    """Sort, clamp and merge overlapping or touching cuts; stronger kinds win the label."""
+    rank = {"rejected_take": 0, "suspect": 1, "filler": 2, "lead": 3, "tail": 3, "pause": 4}
+    cleaned = []
+    for c in sorted(cuts, key=lambda c: c["start"]):
+        s, e = max(0.0, c["start"]), min(duration, c["end"])
+        if e - s <= 0.01:
+            continue
+        if cleaned and s <= cleaned[-1]["end"] + 0.05:
+            last = cleaned[-1]
+            last["end"] = max(last["end"], e)
+            if rank[c["kind"]] < rank[last["kind"]]:
+                last["kind"] = c["kind"]
+            if c["text"]:
+                last["text"] = (last["text"] + " " + c["text"]).strip()
+        else:
+            cleaned.append({"start": s, "end": e, "kind": c["kind"], "text": c["text"]})
+    return cleaned
 
 
 def _render_preview(job: Job, transcript: dict, segments: list[dict]) -> None:
@@ -242,7 +257,7 @@ def report(job: Job, data: dict) -> None:
                   f"[bold]{fmt_clock(s['seconds_out'])}[/] edited")
     bits = []
     labels = {"pause": "pauses", "filler": "filler words", "rejected_take": "rejected takes",
-              "lead": "lead-in", "tail": "tail"}
+              "suspect": "hallucinated lines", "lead": "lead-in", "tail": "tail"}
     for kind, v in s["removed"].items():
         bits.append(f"{v['count']} {labels.get(kind, kind)} ({v['seconds']:.1f}s)")
     if bits:
