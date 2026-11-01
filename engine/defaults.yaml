@@ -1,0 +1,37 @@
+# Engine defaults. Every value here can be overridden in a client's profile.yaml.
+# The engine never hard-codes anything about a specific client.
+
+transcription:
+  model: large-v3-turbo      # faster-whisper model name
+  language: auto             # auto | en | ar  (auto also handles mixed clips)
+  vocabulary: []             # brand names and jargon that help the transcriber
+
+editing:
+  breath: 0.12               # seconds of natural pause kept at every cut
+  sentence_breath: 0.18      # a little longer when the cut falls at the end of a sentence
+  max_pause: 0.45            # pauses longer than this get shortened to `breath`
+  min_cut: 0.12              # don't bother cutting less than this
+  pre_pad: 0.15              # seconds kept before the first word of a segment
+  post_pad: 0.20             # seconds kept after the last word of a segment
+  remove_fillers: true       # cut standalone "um", "uh", "اه"...
+  take_preference: last      # last | best — tie-break between equally good retakes
+  retake_similarity: 0.60    # 0..1, how alike two lines must be to count as retakes
+  retake_window_s: 90        # only lines this close in time can be retakes of each other
+
+format:
+  aspect: "9:16"
+  max_length_s: 60
+  max_raw_minutes: 10
+
+intake:
+  accepted_formats: [mp4, mov, m4v]
+  min_short_side: 720        # pixels; below this a warning is raised
+  clipping_warn_per_minute: 20    # flat-top distortion bursts per minute that raise a warning
+  clipping_block_per_minute: 300  # ... that block the job (about 5 every second)
+  quiet_dbfs: -35            # speech level below this is "very quiet"
+  min_snr_db: 12             # speech-to-noise ratio below this is "noisy"
+
+face:
+  detect_width: 384          # frames are shrunk to this width before detection
+  no_go_margin: 0.06         # extra margin (fraction of frame) around the face box
+  max_gap_s: 1.0             # missing detections shorter than this are interpolated

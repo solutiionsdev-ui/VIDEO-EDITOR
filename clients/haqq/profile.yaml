@@ -1,0 +1,78 @@
+# HAQQ.AI — first pilot client.
+# Filled by Studiio at onboarding and grown by every revision.
+
+client:
+  name: HAQQ.AI
+  slug: haqq
+  contact: ""
+  languages: [en, ar]
+  onboarded: "2026-11-01"
+
+brand:
+  logo: assets/logo.svg
+  logo_dark: assets/logo-dark.svg
+  colours:
+    primary: "#66023C"       # wine
+    secondary: "#002C6C"     # navy
+    accent: "#FFFFFF"
+  fonts:
+    primary: { file: assets/fonts/Poppins-SemiBold.ttf, licence: "SIL Open Font License" }
+  tone: "Confident, clear, lawyer-grade precision without the jargon. Poppins only."
+
+style:
+  name: ios
+  tweaks:
+    - "captions 10% larger"
+    - "white-card layout max 40% of beats"
+
+captions:
+  font: Poppins
+  size_px: 70
+  colour: "#FFFFFF"
+  active_word_colour: "#66023C"
+  position: lower-third
+  max_words_per_line: 4
+  language_rules:
+    - "Arabic right-to-left"
+    - "English words kept in Latin script"
+
+graphics_library:
+  - HAQQ notification card
+  - contract-risk badge
+
+music:
+  moods: [minimal electronic]
+  bpm: "100-110"
+  tracks: []
+  ducking_db: -18
+
+format:
+  aspect: "9:16"
+  max_length_s: 60
+  intro: ""
+  outro: "logo end card 1.5 s"
+  cta: ""
+  safe_zones: instagram
+
+rules:
+  do: []
+  dont:
+    - "never cut jokes"
+    - "never show competitor names"
+
+editing:
+  breath: 0.12
+  max_pause: 0.45
+  remove_fillers: true
+  take_preference: last
+
+transcription:
+  language: auto
+  vocabulary: [HAQQ, "HAQQ.AI", Justinian]
+
+feedback_log: []
+
+review:
+  studiio_review: true
+  reviewed_jobs: 0
+  review_until_jobs: 10

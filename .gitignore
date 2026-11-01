@@ -1,0 +1,19 @@
+# Python / tooling (created automatically by ./reel)
+.venv/
+.tools/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Job folders hold client footage and are confidential — never committed.
+jobs/*
+!jobs/README.md
+
+# Client assets can be large (fonts, logos, music); profiles are committed.
+clients/*/assets/*.mp4
+clients/*/assets/*.mov
+clients/*/assets/*.wav
+clients/*/assets/*.mp3
+
+# macOS
+.DS_Store

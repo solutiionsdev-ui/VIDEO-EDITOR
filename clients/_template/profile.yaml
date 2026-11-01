@@ -1,0 +1,72 @@
+# Client profile template. Copy this folder to clients/<name>/ and fill it in.
+# Everything client-specific lives here. The engine reads it before every job.
+# Any key left out falls back to engine/defaults.yaml.
+
+client:
+  name: ""                   # e.g. HAQQ.AI
+  slug: ""                   # folder-safe name, e.g. haqq
+  contact: ""
+  languages: [en]            # languages the client speaks on camera: en, ar
+  onboarded: ""              # YYYY-MM-DD
+
+brand:
+  logo: assets/logo.svg      # files live in clients/<slug>/assets/
+  logo_dark: ""
+  colours:
+    primary: "#000000"
+    secondary: "#FFFFFF"
+    accent: ""
+  fonts:
+    primary: { file: "", licence: "" }
+  tone: ""                   # one or two sentences about voice and feel
+
+style:
+  name: ios                  # from styles/
+  tweaks: []                 # free-text tweaks, e.g. "captions 10% larger"
+
+captions:
+  font: ""
+  size_px: 64
+  colour: "#FFFFFF"
+  active_word_colour: "#FFD60A"
+  position: lower-third      # lower-third | centre | upper
+  max_words_per_line: 4
+  language_rules: []         # e.g. "Arabic right-to-left, English words kept in Latin script"
+
+graphics_library: []         # reusable branded components built for this client
+
+music:
+  moods: []
+  bpm: ""
+  tracks: []                 # licensed files in assets/music/
+  ducking_db: -18            # music level under voice
+
+format:
+  aspect: "9:16"
+  max_length_s: 60
+  intro: ""
+  outro: "logo end card 1.5 s"
+  cta: ""
+  safe_zones: instagram
+
+rules:
+  do: []
+  dont: []
+
+editing:                     # see engine/defaults.yaml for every option
+  breath: 0.12
+  remove_fillers: true
+
+transcription:
+  language: auto
+  vocabulary: []
+
+feedback_log: []             # grown automatically by every revision
+  # - date: 2026-11-12
+  #   comment: "captions bigger"
+  #   rule: "captions.size_px 64 -> 72"
+
+review:
+  studiio_review: true       # hidden switch: Mario reviews renders before the client sees them
+  reviewed_jobs: 0
+  review_until_jobs: 10

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Launcher for the Studiio Reel Editor engine.
+#
+#   ./reel run jobs/test --client haqq
+#   ./reel intake jobs/test
+#
+# First run only: installs a private copy of Python 3.12 and every library the
+# engine needs (including ffmpeg) inside this folder. Nothing is installed
+# system-wide. Needs an internet connection the first time.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+UV="$(command -v uv || true)"
+if [ -z "$UV" ]; then
+  UV="$ROOT/.tools/bin/uv"
+  if [ ! -x "$UV" ]; then
+    echo "Setting up tools for the first time (about a minute)..." >&2
+    /usr/bin/python3 -m venv "$ROOT/.tools"
+    "$ROOT/.tools/bin/pip" install --quiet --upgrade pip uv
+  fi
+fi
+
+# Quiet down the ML libraries' startup chatter.
+export GLOG_minloglevel=2
+export TF_CPP_MIN_LOG_LEVEL=3
+export TOKENIZERS_PARALLELISM=false
+
+exec "$UV" run --quiet reel "$@"
