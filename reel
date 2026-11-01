@@ -26,5 +26,7 @@ fi
 export GLOG_minloglevel=2
 export TF_CPP_MIN_LOG_LEVEL=3
 export TOKENIZERS_PARALLELISM=false
+# Download the speech model over plain HTTP: resumable after a dropped connection.
+export HF_HUB_DISABLE_XET=1
 
 exec "$UV" run --quiet reel "$@"
