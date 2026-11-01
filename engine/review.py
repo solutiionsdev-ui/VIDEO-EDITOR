@@ -278,7 +278,7 @@ def _face(job: Job) -> str:
 def _video(job: Job, rel: str) -> str:
     if not (job.path / rel).is_file():
         return f"<p class=dim>No preview video ({esc(rel)}). Re-run the stage without --no-preview.</p>"
-    return f'<video controls preload="metadata" src="/{esc(rel)}"></video><div class=dim>{esc(rel)}</div>'
+    return f'<video controls preload="auto" src="/{esc(rel)}#t=0.5"></video><div class=dim>{esc(rel)}</div>'
 
 
 def _empty(title: str, command: str) -> str:
