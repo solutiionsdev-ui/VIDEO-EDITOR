@@ -17,3 +17,9 @@ clients/*/assets/*.mp3
 
 # macOS
 .DS_Store
+
+# Downloaded speech models (large)
+models/
+
+# Claude desktop app launch config
+.claude/

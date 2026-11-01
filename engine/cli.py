@@ -4,6 +4,7 @@
     reel intake|audio|transcribe|takes|cuts|face <job> [--client <slug>] [--show]
     reel show <job> <stage>               print an existing result again
     reel status <job>                     which stages ran, how long they took
+    reel view <job>                       review page at http://localhost:8765
     reel doctor                           check the tools are in place
 """
 
@@ -88,7 +89,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="check that ffmpeg, the models and the libraries work")
     doctor.set_defaults(func=cmd_doctor)
+
+    view = sub.add_parser("view", help="open a local review page for a job (results + preview videos)")
+    view.add_argument("job")
+    view.add_argument("--port", type=int, default=8765)
+    view.add_argument("--no-open", action="store_true", help="don't open the browser automatically")
+    view.set_defaults(func=cmd_view)
     return p
+
+
+def cmd_view(args) -> int:
+    from .review import serve
+
+    serve(Job(Path(args.job)), port=args.port, open_browser=not args.no_open)
+    return 0
 
 
 def _open(args) -> tuple[Job, dict]:

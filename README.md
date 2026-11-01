@@ -39,8 +39,12 @@ stage at a time:
 ./reel face jobs/test --show              # 6. face box per frame + previews/face-preview.mp4
 ./reel status jobs/test                   # which stages ran and how long they took
 ./reel show jobs/test cuts                # print a result again without re-running
+./reel view jobs/test                     # review page in the browser (http://localhost:8765)
 ./reel doctor                             # check ffmpeg, models and libraries
 ```
+
+`./reel view` opens a read-only page with every stage's result and the two preview videos
+playing inline — the easiest way to check a job. Leave it running and reload after re-running a stage.
 
 The client is remembered in the job's `job.json`, so `--client` is only needed the first time.
 

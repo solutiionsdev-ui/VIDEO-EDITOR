@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from pathlib import Path
 
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
@@ -35,8 +36,12 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
 
     from faster_whisper import WhisperModel
 
-    job.log(f"  loading whisper model '{model_name}' (first time: downloads about 1.6 GB)")
-    model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    model_path = _local_model(model_name)
+    if model_path:
+        job.log(f"  loading whisper model '{model_name}' from {model_path}")
+    else:
+        job.log(f"  loading whisper model '{model_name}' (first time: downloads about 1.6 GB)")
+    model = WhisperModel(model_path or model_name, device="cpu", compute_type="int8")
 
     kwargs = dict(
         language=None if language == "auto" else language,
@@ -108,6 +113,17 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
     if show:
         report(job, result)
     return result
+
+
+MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "models"
+
+
+def _local_model(name: str) -> str | None:
+    """A model folder under models/ (e.g. models/faster-whisper-large-v3-turbo) wins over a download."""
+    for candidate in (MODELS_DIR / name, MODELS_DIR / f"faster-whisper-{name}"):
+        if (candidate / "model.bin").is_file() and (candidate / "config.json").is_file():
+            return str(candidate)
+    return None
 
 
 def report(job: Job, data: dict) -> None:

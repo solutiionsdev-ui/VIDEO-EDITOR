@@ -23,6 +23,7 @@ from assumptions about the client.
 ./reel show <job> <stage>             # print a result without re-running it
 ./reel status <job>                   # stages run, timings (for cost tracking)
 ./reel run <job> --from takes         # re-run from a stage after changing the profile
+./reel view <job>                     # read-only review page at http://localhost:8765 (previews play inline)
 ```
 
 Every stage reads the job folder and writes one JSON file, so a stage can be re-run alone after a
