@@ -149,7 +149,10 @@ def render(job: Job) -> str:
 
 
 def _sequence_video(job: Job) -> str | None:
-    renders = sorted((job.path / "renders").glob("v*.mp4")) if (job.path / "renders").is_dir() else []
+    renders = []
+    if (job.path / "renders").is_dir():
+        renders = sorted((p for p in (job.path / "renders").glob("v*.mp4") if re.fullmatch(r"v\d+\.mp4", p.name)),
+                         key=lambda p: int(p.stem[1:]))
     if renders:
         return f"renders/{renders[-1].name}"
     if (job.path / "previews" / "cut-preview.mp4").is_file():

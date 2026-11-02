@@ -18,9 +18,9 @@ from pathlib import Path
 from rich.table import Table
 
 from . import __version__
-from .job import STAGES, Job, JobError, console
+from .job import RUN_DEFAULT_TO, STAGES, Job, JobError, console
 from .profile import load_profile
-from .stages import audio, beats, cuts, face, intake, takes, transcribe
+from .stages import audio, beats, cuts, face, intake, render, stills, takes, transcribe
 
 STAGE_MODULES = {
     "intake": intake,
@@ -30,6 +30,8 @@ STAGE_MODULES = {
     "cuts": cuts,
     "face": face,
     "beats": beats,
+    "stills": stills,
+    "render": render,
 }
 NEEDS = {
     "audio": "intake.json",
@@ -38,6 +40,8 @@ NEEDS = {
     "cuts": "takes.json",
     "face": "cuts.json",
     "beats": "face.json",
+    "stills": "beats.json",
+    "render": "beats.json",
 }
 
 
@@ -69,7 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("job")
     run.add_argument("--client", help="client slug (clients/<slug>/profile.yaml) or a path to a profile")
     run.add_argument("--from", dest="from_stage", choices=STAGES, help="start at this stage")
-    run.add_argument("--to", dest="to_stage", choices=STAGES, default=STAGES[-1], help="stop after this stage")
+    run.add_argument("--to", dest="to_stage", choices=STAGES, default=RUN_DEFAULT_TO,
+                     help=f"stop after this stage (default {RUN_DEFAULT_TO}; the render is a separate approval)")
     run.add_argument("--force", action="store_true", help="continue even if intake found blockers")
     run.add_argument("--no-preview", action="store_true", help="skip the preview videos (faster)")
     run.set_defaults(func=cmd_run)
@@ -85,11 +90,13 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--planner", choices=["auto", "api", "manual"], default=None,
                             help="auto: Claude API if credentials exist, else Claude Code writes the plan")
             sp.add_argument("--force", action="store_true", help="plan again even if beats-plan.json exists")
+        if name == "render":
+            sp.add_argument("--workers", type=int, default=None, help="parallel browser renderers (default: cores/3, max 4)")
         sp.set_defaults(func=cmd_stage, stage=name)
 
-    show = sub.add_parser("show", help="print an existing result (intake, transcript, takes, cuts, face, beats)")
+    show = sub.add_parser("show", help="print an existing result (intake, transcript, takes, cuts, face, beats, stills, render)")
     show.add_argument("job")
-    show.add_argument("stage", choices=["intake", "transcript", "transcribe", "takes", "cuts", "face", "beats"])
+    show.add_argument("stage", choices=["intake", "transcript", "transcribe", "takes", "cuts", "face", "beats", "stills", "render"])
     show.set_defaults(func=cmd_show)
 
     status = sub.add_parser("status", help="which stages have run on a job")
@@ -126,19 +133,21 @@ def _open(args) -> tuple[Job, dict]:
 
 
 def _run_one(job: Job, profile: dict, stage: str, show: bool, preview: bool = True,
-             planner: str | None = None, force: bool = False):
+             planner: str | None = None, force: bool = False, workers: int | None = None):
     need = NEEDS.get(stage)
     if need and not job.has(need):
         raise JobError(f"'{stage}' needs {need}. Run the earlier stages first (or `reel run {job.path}`).")
     module = STAGE_MODULES[stage]
     kwargs = {}
-    if stage in ("transcribe", "takes", "cuts", "face", "beats"):
+    if stage in ("transcribe", "takes", "cuts", "face", "beats", "stills", "render"):
         kwargs["show"] = show
     if stage in ("cuts", "face"):
         kwargs["preview_video"] = preview
     if stage == "beats":
         kwargs["planner"] = planner or str(profile.get("ai", {}).get("planner", "auto"))
         kwargs["force"] = force
+    if stage == "render" and workers:
+        kwargs["workers"] = workers
     return job.run_stage(stage, module.run, profile, **kwargs)
 
 
@@ -146,7 +155,8 @@ def cmd_stage(args) -> int:
     job, profile = _open(args)
     preview = not getattr(args, "no_preview", False)
     result = _run_one(job, profile, args.stage, args.show, preview,
-                      planner=getattr(args, "planner", None), force=getattr(args, "force", False))
+                      planner=getattr(args, "planner", None), force=getattr(args, "force", False),
+                      workers=getattr(args, "workers", None))
     if args.stage == "intake" and result["status"] == "blocked":
         return 3
     return 0
@@ -203,7 +213,13 @@ def cmd_show(args) -> int:
     stage = {"transcribe": "transcript"}.get(args.stage, args.stage)
     files = {"intake": ("intake.json", intake), "transcript": ("transcript.json", transcribe),
              "takes": ("takes.json", takes), "cuts": ("cuts.json", cuts), "face": ("face.json", face),
-             "beats": ("beats.json", beats)}
+             "beats": ("beats.json", beats), "stills": ("stills/index.json", stills)}
+    if stage == "render":
+        manifests = sorted((job.path / "renders").glob("v*.json")) if (job.path / "renders").is_dir() else []
+        if not manifests:
+            raise JobError("No render yet. Run `reel render <job>`.")
+        render.report(job, job.read_json(f"renders/{manifests[-1].name}"))
+        return 0
     name, module = files[stage]
     module.report(job, job.read_json(name))
     return 0
@@ -217,7 +233,8 @@ def cmd_status(args) -> int:
     table.add_column("time", justify="right")
     table.add_column("result")
     outputs = {"intake": "intake.json", "audio": "audio/index.json", "transcribe": "transcript.json",
-               "takes": "takes.json", "cuts": "cuts.json", "face": "face.json", "beats": "beats.json"}
+               "takes": "takes.json", "cuts": "cuts.json", "face": "face.json", "beats": "beats.json",
+               "stills": "stills/index.json", "render": "renders/v1.mp4"}
     for stage in STAGES:
         entry = job.state.get("stages", {}).get(stage, {})
         status = entry.get("status", "—")
@@ -250,6 +267,15 @@ def cmd_doctor(args) -> int:
     else:
         ok = False
         console.print(f"[red]✖[/] face model missing at {face.MODEL}")
+    proc = subprocess.run([sys.executable, "-c",
+                           "from playwright.sync_api import sync_playwright\n"
+                           "with sync_playwright() as p:\n    b = p.chromium.launch(headless=True); print(b.version); b.close()"],
+                          capture_output=True, text=True)
+    if proc.returncode == 0:
+        console.print(f"[green]✔[/] Chromium for the renderer ({proc.stdout.strip()})")
+    else:
+        ok = False
+        console.print("[red]✖[/] Chromium for the renderer is missing — run: .venv/bin/playwright install chromium")
     cache = Path.home() / ".cache" / "huggingface" / "hub"
     models = sorted(p.name for p in cache.glob("models--*whisper*")) if cache.is_dir() else []
     if models:

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Studiio renderer</title>
+<style>
+  /* The stage is the output frame. Everything else is positioned inside it. */
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #000;
+           font-family: var(--font, "Poppins"), -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #bg { position: absolute; inset: 0; display: none; }
+  #footage-wrap { position: absolute; inset: 0; overflow: hidden; background: #000; }
+  #footage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+  #widget-zone { position: absolute; left: 0; right: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  #widget { transform-origin: center center; will-change: transform, opacity; }
+  #captions { position: absolute; left: 6%; right: 6%; display: flex; align-items: center; justify-content: center;
+              text-align: center; pointer-events: none; }
+  #endcard { position: absolute; inset: 0; display: none; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bg"></div>
+  <div id="footage-wrap"><img id="footage" alt=""></div>
+  <div id="endcard"></div>
+  <div id="widget-zone"><div id="widget"></div></div>
+  <div id="captions"></div>
+</div>
+<script src="render.js"></script>
+</body>
+</html>
