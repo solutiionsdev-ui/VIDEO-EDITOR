@@ -31,7 +31,10 @@ END_CARD_SECONDS = 1.5
 RENDERER_FILES = [ROOT / "renderer" / "page.html", ROOT / "renderer" / "render.js"]
 
 
-def run(job: Job, profile: dict, show: bool = False, workers: int | None = None) -> dict:
+def run(job: Job, profile: dict, show: bool = False, workers: int | None = None,
+        version: int | None = None, run_check: bool = True) -> dict:
+    """Render the reel. `version` re-renders an existing version in place (quality-check fixes);
+    `run_check` runs the automatic quality check on the result."""
     beats_doc = job.read_json("beats.json")
     cuts = job.read_json("cuts.json")
     face = job.read_json("face.json") if job.has("face.json") else None
@@ -88,7 +91,9 @@ def run(job: Job, profile: dict, show: bool = False, workers: int | None = None)
         shutil.rmtree(tmp_root, ignore_errors=True)
 
     # Join, then audio.
-    version = 1 + len(list((job.path / "renders").glob("v*.mp4")))
+    if version is None:
+        existing = [int(p.stem[1:]) for p in (job.path / "renders").glob("v*.json") if p.stem[1:].isdigit()]
+        version = (max(existing) + 1) if existing else 1
     out = job.path / "renders" / f"v{version}.mp4"
     joined = job.path / "renders" / f"v{version}-video.mp4"
     parts = [Path(it["out"]) for it in items] + ([Path(end_item["out"])] if end_item else [])
@@ -113,6 +118,8 @@ def run(job: Job, profile: dict, show: bool = False, workers: int | None = None)
         "music": music.name if music else None,
         "end_card": bool(end_item),
         "render_seconds": seconds,
+        "beats_version": beats_doc.get("version", 1),
+        "changes": [c for c in beats_doc.get("changes", []) if c.get("version") == beats_doc.get("version", 1)],
         "beats": [{"id": it["id"], "name": it["name"], "frames": [it["f0"], it["f1"]], "key": it["key"],
                    "rendered": str(it["id"]) in timings, "seconds": timings.get(str(it["id"]))} for it in items],
     }
@@ -120,10 +127,37 @@ def run(job: Job, profile: dict, show: bool = False, workers: int | None = None)
     u = job.state.setdefault("usage", {})
     u["render_seconds"] = round(u.get("render_seconds", 0) + seconds, 1)
     job.save_state()
+    _prune_cache(job, keep_versions=2)
     job.log(f"  → renders/{out.name} ({fmt_clock(total)}, {seconds}s)")
+
+    if run_check:
+        from . import check as check_stage
+
+        job.log("  quality check…")
+        result = check_stage.run(job, profile, show=show, version=version, fix=True)
+        manifest = job.read_json(f"renders/v{version}.json")
+        manifest["check"] = result["status"]
+        job.write_json(f"renders/v{version}.json", manifest)
     if show:
         report(job, manifest)
     return manifest
+
+
+def _prune_cache(job: Job, keep_versions: int = 2) -> None:
+    """Drop cached beats that no recent version uses."""
+    renders = job.path / "renders"
+    manifests = sorted((p for p in renders.glob("v*.json") if p.stem[1:].isdigit()), key=lambda p: int(p.stem[1:]))
+    keep: set[str] = set()
+    for p in manifests[-keep_versions:]:
+        try:
+            keep.update(b["key"] for b in json.loads(p.read_text())["beats"])
+        except (ValueError, KeyError):
+            pass
+    for p in (renders / "cache").glob("*.mp4"):
+        if p.stem not in keep and len(keep) > 0:
+            # the end card's key is not in beats[]; keep anything younger than a day to be safe
+            if time.time() - p.stat().st_mtime > 86400:
+                p.unlink(missing_ok=True)
 
 
 def _key(spec: dict, f0: int, f1: int, base_fp: str, renderer_fp: str) -> str:
@@ -182,6 +216,9 @@ def _render_item(item: dict, tmp_root: str) -> float:
 def report(job: Job, data: dict) -> None:
     console.print(f"\nRender v{data['version']}: {data['file']} · {fmt_clock(data['duration'])} · "
                   f"{data['size'][0]}×{data['size'][1]} @ {data['fps']} fps · {data['render_seconds']}s"
-                  + (f" · music {data['music']}" if data.get("music") else " · no music"))
+                  + (f" · music {data['music']}" if data.get("music") else " · no music")
+                  + (f" · quality check {data['check'].upper()}" if data.get("check") else ""))
     rendered = [b for b in data["beats"] if b["rendered"]]
     console.print(f"  {len(rendered)} beats rendered, {len(data['beats']) - len(rendered)} reused from cache")
+    for c in data.get("changes", []):
+        console.print(f"  changed: beat {c.get('beat', '—')} — {c.get('change')}  ({c.get('comment')})")

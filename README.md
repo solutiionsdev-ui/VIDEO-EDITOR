@@ -17,8 +17,24 @@ command line on one machine.
 | 7. Beat plan (Claude's judgment) | `./reel beats <job> --show` | `beats.json` (+ `beats-request.md`, `beats-plan.json`) | ✅ |
 | 8. Storyboard stills | `./reel stills <job>` | `stills/beat-XX.jpg` + `renders/base.mp4` | ✅ |
 | 10. Render | `./reel render <job>` | `renders/v1.mp4` (+ `renders/v1.json`) | ✅ |
-| 11. Quality check | | | next |
-| 12. Revision | | | next |
+| 11. Quality check | `./reel check <job>` (also runs after every render) | `renders/v1-check.json` | ✅ |
+| 12. Revision | `./reel revise <job> "beat 4: captions bigger"` | `beats.json` v2, profile feedback log, `renders/v2.mp4` | ✅ |
+
+## Quality check and revisions (stages 11 and 12)
+
+Every render is checked before anyone sees it: format (1080×1920, 30 fps, length, audio), audio level
+(−15 to −13 LUFS, true peak under −1 dBTP), caption sync (every caption word within 0.1 s of its
+transcript time), face clear (no widget or caption box ever overlaps the tracked face), clean cuts
+(no cut on speech, no click), black/frozen runs over 0.2 s, and a visual review that compares every
+rendered frame with the approved still. Loudness, a widget on the face and a frozen beat are fixed and
+re-rendered automatically (two rounds at most); anything else is reported as a fail.
+
+`./reel revise jobs/test "beat 4: captions bigger" "0:32 no graphic here"` pins each comment to a
+beat (by number or timestamp), turns it into a change, applies it (locked beats are skipped), appends
+the rule to the client's `feedback_log` in `profile.yaml`, regenerates the stills and re-renders —
+only the changed beats, the rest comes from the cache. The Beat Board then shows "Changes since last
+version". Comments the plain rules don't understand go to Claude via `revision-request.md` →
+`revision-plan.json`, exactly like the beat plan.
 
 ## The renderer (stages 8 and 10)
 
@@ -79,7 +95,9 @@ stage at a time:
 ./reel face jobs/test --show              # 6. face box per frame + previews/face-preview.mp4
 ./reel beats jobs/test --show             # 7. the beat board (see below)
 ./reel stills jobs/test                   # 8. one rendered still per beat → stills/
-./reel render jobs/test                   # 10. the reel → renders/v1.mp4
+./reel render jobs/test                   # 10. the reel → renders/v1.mp4 (+ quality check)
+./reel check jobs/test --show             # 11. check the latest render again
+./reel revise jobs/test "beat 4: captions bigger"   # 12. a revision round
 ./reel status jobs/test                   # which stages ran and how long they took
 ./reel show jobs/test cuts                # print a result again without re-running
 ./reel view jobs/test                     # review page in the browser (http://localhost:8765)

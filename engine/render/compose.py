@@ -112,6 +112,67 @@ def mix_and_mux(video: Path, base_audio: Path, out: Path, *, total: float, music
     return out
 
 
+def loudness(path: Path) -> dict:
+    """Integrated loudness, range and true peak of a file's audio (EBU R128)."""
+    import re
+    import subprocess
+
+    proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", "-nostats", "-i", str(path), "-vn",
+                           "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"], capture_output=True, text=True)
+    text = proc.stderr
+    def grab(pattern):
+        m = re.findall(pattern, text)
+        return float(m[-1]) if m else None
+    return {"lufs": grab(r"I:\s+(-?\d+(?:\.\d+)?) LUFS"), "lra": grab(r"LRA:\s+(-?\d+(?:\.\d+)?) LU"),
+            "true_peak": grab(r"Peak:\s+(-?\d+(?:\.\d+)?) dBFS")}
+
+
+def black_frozen(path: Path, duration: float | None, min_run: float = 0.2,
+                 crop: tuple[int, int, int, int] | None = None) -> dict:
+    """Runs of black or frozen frames longer than min_run seconds, within the first `duration` seconds.
+
+    `crop` (w, h, x, y) limits the freeze test to the moving region — in the white-card layout most
+    of the frame is a still background by design, so only the footage card is tested there.
+    """
+    import re
+    import subprocess
+
+    args = [ffmpeg_exe(), "-hide_banner", "-nostdin", "-nostats", "-i", str(path)]
+    if duration:
+        args += ["-t", f"{duration:.3f}"]
+    cropf = f"crop={crop[0]}:{crop[1]}:{crop[2]}:{crop[3]}," if crop else ""
+    # -60 dB catches duplicated/stuck frames (their difference is encoder noise only) but not a person holding still.
+    args += ["-an", "-vf", f"blackdetect=d={min_run}:pic_th=0.98,{cropf}freezedetect=n=-60dB:d={min_run}", "-f", "null", "-"]
+    proc = subprocess.run(args, capture_output=True, text=True)
+    black = [(float(a), float(b)) for a, b in re.findall(r"black_start:(\d+(?:\.\d+)?) black_end:(\d+(?:\.\d+)?)", proc.stderr)]
+    starts = [float(x) for x in re.findall(r"freeze_start: (\d+(?:\.\d+)?)", proc.stderr)]
+    ends = [float(x) for x in re.findall(r"freeze_end: (\d+(?:\.\d+)?)", proc.stderr)]
+    frozen = list(zip(starts, ends))
+    if len(starts) > len(ends):
+        frozen.append((starts[-1], duration or starts[-1]))
+    return {"black": black, "frozen": frozen}
+
+
+def remix_audio(video_with_audio: Path, base_audio: Path, out: Path, *, total: float, music: Path | None,
+                ducking_db: float, measured: dict) -> Path:
+    """Second loudness pass: linear gain from the measured values, so the result lands on target."""
+    inputs = ["-i", str(video_with_audio), "-i", str(base_audio)]
+    chain = f"[1:a]aresample=48000,apad=whole_dur={total:.3f},atrim=0:{total:.3f}[v]"
+    if music:
+        inputs += ["-stream_loop", "-1", "-i", str(music)]
+        chain += (f";[2:a]aresample=48000,atrim=0:{total:.3f},afade=t=out:st={max(0.0, total - 1.5):.3f}:d=1.5,"
+                  f"volume={ducking_db}dB[m];[m][v]sidechaincompress=threshold=0.02:ratio=6:attack=40:release=600[md];"
+                  f"[v][md]amix=inputs=2:normalize=0:duration=first[mix]")
+        last = "[mix]"
+    else:
+        last = "[v]"
+    chain += (f";{last}loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={measured['lufs']}:measured_TP={measured['true_peak']}:"
+              f"measured_LRA={measured.get('lra') or 7}:measured_thresh={measured['lufs'] - 10:.1f}:linear=true[a]")
+    run_ffmpeg(inputs + ["-filter_complex", chain, "-map", "0:v", "-map", "[a]", "-c:v", "copy",
+                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out)])
+    return out
+
+
 def find_music(job: Job, profile: dict) -> Path | None:
     for p in job.optional_files("music"):
         if p.suffix.lower() in (".mp3", ".wav", ".m4a", ".aac", ".aif", ".aiff"):

@@ -18,7 +18,7 @@ from rich.console import Console
 
 console = Console(highlight=False)
 
-STAGES = ["intake", "audio", "transcribe", "takes", "cuts", "face", "beats", "stills", "render"]
+STAGES = ["intake", "audio", "transcribe", "takes", "cuts", "face", "beats", "stills", "render", "check"]
 RUN_DEFAULT_TO = "stills"   # `reel run` stops at the beat board; `reel render` is the client's approval
 
 RAW_EXTENSIONS = {".mp4", ".mov", ".m4v", ".hevc", ".avi", ".mkv", ".webm", ".mts", ".3gp"}

@@ -127,6 +127,8 @@ def render(job: Job) -> str:
     body = [
         _hero(job, client_name, beats, cuts, profile),
         _sequence(job, beats, cuts, video),
+        _changes(beats),
+        _quality(job),
         _beats_table(beats),
         _shots(job, beats),
         _copy(beats, client_name),
@@ -216,6 +218,40 @@ def _sequence(job: Job, beats: dict | None, cuts: dict | None, video: str | None
 <div class="beatlabel" id="beatlabel">{esc('Beat 1 · ' + beats['beats'][0]['name']) if beats else ''}</div>
 </div></div>
 <p class="dim">{what}</p></section>"""
+
+
+def _changes(beats: dict | None) -> str:
+    if not beats or not beats.get("changes"):
+        return ""
+    v = beats.get("version", 1)
+    latest = [c for c in beats["changes"] if c.get("version") == v]
+    if not latest:
+        return ""
+    items = "".join(f'<li><strong>Beat {c.get("beat", "—")}</strong> — {esc(c.get("change"))} '
+                    f'<span class="dim">← “{esc(c.get("comment"))}”</span></li>' for c in latest)
+    return f'<section id="changes"><h2>Changes since last version <span class="dim">v{v}</span></h2><ul class="changes">{items}</ul></section>'
+
+
+def _quality(job: Job) -> str:
+    from .stages.check import latest_version
+
+    version = latest_version(job)
+    if version is None or not job.has(f"renders/v{version}-check.json"):
+        return ""
+    d = job.read_json(f"renders/v{version}-check.json")
+    labels = {"format": "Format", "audio_level": "Audio level", "caption_sync": "Caption sync", "face_clear": "Face clear",
+              "clean_cuts": "Clean cuts", "black_frozen": "Black / frozen", "visual_review": "Visual review"}
+    kinds = {"pass": "ok", "fail": "bad", "review": "warn", "warn": "none"}
+    rows = []
+    for key, c in d["checks"].items():
+        items = "".join(f"<li>{esc(i)}</li>" for i in c.get("items", [])[:6])
+        rows.append(f'<tr><td>{esc(labels.get(key, key))}</td><td>{_badge(c["status"], kinds.get(c["status"], "none"))}</td>'
+                    f'<td>{esc(c["detail"])}{f"<ul class=issues>{items}</ul>" if items else ""}</td></tr>')
+    fixes = "".join(f'<li>{esc(f["what"])}</li>' for f in d.get("fixes", []))
+    overall = _badge(d["status"], kinds.get(d["status"], "none"))
+    return (f'<section id="quality"><h2>Quality check <span class="dim">v{version}</span> {overall}</h2>'
+            f'<table class="compact wide"><tr><th>check</th><th>result</th><th>detail</th></tr>{"".join(rows)}</table>'
+            f'{f"<p class=dim>Fixed automatically:</p><ul class=issues>{fixes}</ul>" if fixes else ""}</section>')
 
 
 def _beats_table(beats: dict | None) -> str:
@@ -455,7 +491,8 @@ h2 .dim{font-weight:400;font-size:14px;margin-left:8px}h3{font-size:16px;margin:
 .track i{position:absolute;top:-3px;width:1px;height:10px;background:#6b6e80}
 .time{color:var(--muted);font-size:13px}.beatlabel{font-weight:600;font-size:14px;min-width:150px;text-align:right}
 table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em}table.compact{max-width:480px}
+th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em}table.compact{max-width:480px}table.compact.wide{max-width:none}
+ul.changes{padding-left:20px}ul.changes li{margin:4px 0}
 table.beats td.name{font-weight:600;white-space:nowrap}table.beats tr.current td{background:#1f2030}table.beats tbody tr{cursor:pointer}
 .mono{font-variant-numeric:tabular-nums;white-space:nowrap}.dim{color:var(--muted)}
 .badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;vertical-align:middle}

@@ -3,6 +3,8 @@
     reel run <job> --client <slug>        run every stage built so far
     reel intake|audio|transcribe|takes|cuts|face <job> [--client <slug>] [--show]
     reel show <job> <stage>               print an existing result again
+    reel check <job>                      quality check of the latest render (fixes and re-renders what it can)
+    reel revise <job> "beat 4: ..."       apply client comments, log the rules, re-render changed beats
     reel status <job>                     which stages ran, how long they took
     reel view <job>                       review page at http://localhost:8765
     reel doctor                           check the tools are in place
@@ -20,7 +22,7 @@ from rich.table import Table
 from . import __version__
 from .job import RUN_DEFAULT_TO, STAGES, Job, JobError, console
 from .profile import load_profile
-from .stages import audio, beats, cuts, face, intake, render, stills, takes, transcribe
+from .stages import audio, beats, check, cuts, face, intake, render, revise, stills, takes, transcribe
 
 STAGE_MODULES = {
     "intake": intake,
@@ -32,6 +34,7 @@ STAGE_MODULES = {
     "beats": beats,
     "stills": stills,
     "render": render,
+    "check": check,
 }
 NEEDS = {
     "audio": "intake.json",
@@ -42,6 +45,7 @@ NEEDS = {
     "beats": "face.json",
     "stills": "beats.json",
     "render": "beats.json",
+    "check": "beats.json",
 }
 
 
@@ -92,11 +96,24 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--force", action="store_true", help="plan again even if beats-plan.json exists")
         if name == "render":
             sp.add_argument("--workers", type=int, default=None, help="parallel browser renderers (default: cores/3, max 4)")
+            sp.add_argument("--no-check", action="store_true", help="skip the automatic quality check")
+        if name == "check":
+            sp.add_argument("--version", type=int, default=None, help="render version to check (default: latest)")
+            sp.add_argument("--no-fix", action="store_true", help="report only; don't fix and re-render")
         sp.set_defaults(func=cmd_stage, stage=name)
 
-    show = sub.add_parser("show", help="print an existing result (intake, transcript, takes, cuts, face, beats, stills, render)")
+    rev = sub.add_parser("revise", help="apply client comments: re-plan the beats they touch, log the rules, re-render")
+    rev.add_argument("job")
+    rev.add_argument("comments", nargs="*", help='e.g. "beat 4: captions bigger" "0:32 no graphic here"')
+    rev.add_argument("--file", help="a text file with one comment per line")
+    rev.add_argument("--client")
+    rev.add_argument("--no-render", action="store_true", help="apply the changes but don't render")
+    rev.add_argument("--show", action="store_true")
+    rev.set_defaults(func=cmd_revise)
+
+    show = sub.add_parser("show", help="print an existing result (intake, transcript, takes, cuts, face, beats, stills, render, check)")
     show.add_argument("job")
-    show.add_argument("stage", choices=["intake", "transcript", "transcribe", "takes", "cuts", "face", "beats", "stills", "render"])
+    show.add_argument("stage", choices=["intake", "transcript", "transcribe", "takes", "cuts", "face", "beats", "stills", "render", "check"])
     show.set_defaults(func=cmd_show)
 
     status = sub.add_parser("status", help="which stages have run on a job")
@@ -133,21 +150,27 @@ def _open(args) -> tuple[Job, dict]:
 
 
 def _run_one(job: Job, profile: dict, stage: str, show: bool, preview: bool = True,
-             planner: str | None = None, force: bool = False, workers: int | None = None):
+             planner: str | None = None, force: bool = False, workers: int | None = None,
+             no_check: bool = False, version: int | None = None, no_fix: bool = False):
     need = NEEDS.get(stage)
     if need and not job.has(need):
         raise JobError(f"'{stage}' needs {need}. Run the earlier stages first (or `reel run {job.path}`).")
     module = STAGE_MODULES[stage]
     kwargs = {}
-    if stage in ("transcribe", "takes", "cuts", "face", "beats", "stills", "render"):
+    if stage in ("transcribe", "takes", "cuts", "face", "beats", "stills", "render", "check"):
         kwargs["show"] = show
     if stage in ("cuts", "face"):
         kwargs["preview_video"] = preview
     if stage == "beats":
         kwargs["planner"] = planner or str(profile.get("ai", {}).get("planner", "auto"))
         kwargs["force"] = force
-    if stage == "render" and workers:
-        kwargs["workers"] = workers
+    if stage == "render":
+        if workers:
+            kwargs["workers"] = workers
+        kwargs["run_check"] = not no_check
+    if stage == "check":
+        kwargs["version"] = version
+        kwargs["fix"] = not no_fix
     return job.run_stage(stage, module.run, profile, **kwargs)
 
 
@@ -156,10 +179,22 @@ def cmd_stage(args) -> int:
     preview = not getattr(args, "no_preview", False)
     result = _run_one(job, profile, args.stage, args.show, preview,
                       planner=getattr(args, "planner", None), force=getattr(args, "force", False),
-                      workers=getattr(args, "workers", None))
+                      workers=getattr(args, "workers", None), no_check=getattr(args, "no_check", False),
+                      version=getattr(args, "version", None), no_fix=getattr(args, "no_fix", False))
     if args.stage == "intake" and result["status"] == "blocked":
         return 3
+    if args.stage == "check" and result["status"] == "fail":
+        return 5
     return 0
+
+
+def cmd_revise(args) -> int:
+    job, profile = _open(args)
+    comments = list(args.comments or [])
+    if args.file:
+        comments += [line.strip() for line in Path(args.file).read_text(encoding="utf-8").splitlines() if line.strip()]
+    result = job.run_stage("revise", revise.run, profile, comments, show=args.show, render=not args.no_render)
+    return 5 if result.get("check") == "fail" else 0
 
 
 def cmd_run(args) -> int:
@@ -214,11 +249,16 @@ def cmd_show(args) -> int:
     files = {"intake": ("intake.json", intake), "transcript": ("transcript.json", transcribe),
              "takes": ("takes.json", takes), "cuts": ("cuts.json", cuts), "face": ("face.json", face),
              "beats": ("beats.json", beats), "stills": ("stills/index.json", stills)}
-    if stage == "render":
-        manifests = sorted((job.path / "renders").glob("v*.json")) if (job.path / "renders").is_dir() else []
-        if not manifests:
+    if stage in ("render", "check"):
+        version = check.latest_version(job)
+        if version is None:
             raise JobError("No render yet. Run `reel render <job>`.")
-        render.report(job, job.read_json(f"renders/{manifests[-1].name}"))
+        if stage == "render":
+            render.report(job, job.read_json(f"renders/v{version}.json"))
+        else:
+            if not job.has(f"renders/v{version}-check.json"):
+                raise JobError(f"v{version} has not been checked. Run `reel check <job>`.")
+            check.report(job, job.read_json(f"renders/v{version}-check.json"))
         return 0
     name, module = files[stage]
     module.report(job, job.read_json(name))
@@ -234,7 +274,7 @@ def cmd_status(args) -> int:
     table.add_column("result")
     outputs = {"intake": "intake.json", "audio": "audio/index.json", "transcribe": "transcript.json",
                "takes": "takes.json", "cuts": "cuts.json", "face": "face.json", "beats": "beats.json",
-               "stills": "stills/index.json", "render": "renders/v1.mp4"}
+               "stills": "stills/index.json", "render": "renders/v1.mp4", "check": "renders/v1-check.json"}
     for stage in STAGES:
         entry = job.state.get("stages", {}).get(stage, {})
         status = entry.get("status", "—")

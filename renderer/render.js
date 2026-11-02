@@ -29,7 +29,8 @@
     stage.style.setProperty("--font", `"${spec.brand.font.family}"`);
     stage.style.setProperty("--accent", spec.brand.primary);
     stage.style.setProperty("--secondary", spec.brand.secondary);
-    stage.style.setProperty("--cap-size", spec.captions.size_px + "px");
+    const capScale = (spec.beat.render && spec.beat.render.caption_scale) || 1;
+    stage.style.setProperty("--cap-size", Math.round(spec.captions.size_px * capScale) + "px");
     stage.className = "layout-" + spec.beat.layout;
     installFonts(spec);
     installStyle(spec.style_css);
@@ -53,6 +54,25 @@
     await document.fonts.ready;
     fitWidget(geo);
     return geo;
+  };
+
+  // Where things are on the frame at the current time (stage pixels), for the quality check.
+  window.boxes = function () {
+    const stage = $("stage").getBoundingClientRect();
+    const rect = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return null;
+      const op = parseFloat(getComputedStyle(el).opacity || "1");
+      if (op < 0.05) return null;
+      return [Math.round(r.left - stage.left), Math.round(r.top - stage.top), Math.round(r.width), Math.round(r.height)];
+    };
+    const line = [...document.querySelectorAll(".cap-line")].find((l) => l.style.display !== "none");
+    return {
+      widget: S.widget ? rect($("widget")) : null,
+      captions: line ? rect(line) : null,
+      card: S.geo && S.geo.card ? [S.geo.card.x, S.geo.card.y, S.geo.card.w, S.geo.card.h] : null,
+    };
   };
 
   window.seek = async function (t, footageUrl) {
@@ -84,7 +104,8 @@
     const W = spec.width, H = spec.height, b = spec.beat, safe = spec.safe;
     const noGo = b.no_go || [0.3, 0.3, 0.7, 0.65];
     const capLines = 1;
-    const capH = Math.round(spec.captions.size_px * (b.caption.style === "emphasis" ? 1.15 : 1) * 1.45 * capLines);
+    const capScale = (b.render && b.render.caption_scale) || 1;
+    const capH = Math.round(spec.captions.size_px * capScale * (b.caption.style === "emphasis" ? 1.15 : 1) * 1.45 * capLines);
     const geo = { W, H, capH };
     const fw = $("footage-wrap"), bg = $("bg"), zone = $("widget-zone"), caps = $("captions");
 
@@ -103,7 +124,7 @@
       geo.captionTheme = "light";
     } else {
       fw.style.cssText = "";
-      const anchor = (b.graphic && b.graphic.anchor) || "top";
+      const anchor = (b.render && b.render.anchor) || (b.graphic && b.graphic.anchor) || "top";
       const topZone = { top: Math.round(safe.top * H), bottom: Math.round((noGo[1] - 0.02) * H) };
       let capTop = Math.round(Math.max(noGo[3] + 0.04, 0.70) * H);
       const capBottomMax = Math.round((1 - safe.bottom) * H);
@@ -129,7 +150,7 @@
     const maxH = geo.zone.bottom - geo.zone.top - 8;
     const maxW = geo.W * 0.86;
     const h = w.offsetHeight, wd = w.offsetWidth;
-    S.fit = Math.min(1, maxH / Math.max(1, h), maxW / Math.max(1, wd));
+    S.fit = Math.min(1, maxH / Math.max(1, h), maxW / Math.max(1, wd)) * (S.shrink || 1);
     if (S.fit < 0.999) w.style.transformOrigin = "center center";
   }
 
@@ -146,6 +167,7 @@
     w.className = "widget w-" + g.component;
     S.widget = { animate: built.animate ? built.animate(w, spec) : () => {} };
     S.tIn = spec.beat.is_first ? spec.style.motion_first_beat_delay : 0.1;
+    S.shrink = (spec.beat.render && spec.beat.render.shrink) || 1;   // quality-check fix: make the widget smaller
   }
 
   COMPONENTS["headline"] = (p) => {

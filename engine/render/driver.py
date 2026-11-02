@@ -68,6 +68,11 @@ class Renderer:
         self.seek(t, footage)
         self.screenshot(out, quality)
 
+    def boxes(self, t: float) -> dict:
+        """Element boxes [x, y, w, h] at time t, without rendering a frame."""
+        self._page.evaluate("t => window.seek(t, null)", float(t))
+        return self._page.evaluate("() => window.boxes()")
+
 
 # -- spec --------------------------------------------------------------------
 
@@ -137,6 +142,7 @@ def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last
             "caption": beat.get("caption") or {"style": "normal", "highlight": []},
             "duration": float(beat["duration"]), "words": words, "no_go": beat.get("no_go"),
             "is_first": is_first, "is_last": is_last, "hold_widget": False,
+            "render": beat.get("render") or {},     # quality-check overrides: anchor, shrink
         },
     }
 
