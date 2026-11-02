@@ -9,8 +9,8 @@ client:
   onboarded: "2026-11-01"
 
 brand:
-  logo: assets/logo.svg
-  logo_dark: assets/logo-dark.svg
+  logo: assets/logo.webp              # purple/wine logo for light backgrounds
+  logo_dark: assets/logo-white.webp   # white logo for dark or brand-colour backgrounds
   colours:
     primary: "#66023C"       # wine
     secondary: "#002C6C"     # navy
@@ -55,10 +55,14 @@ format:
   safe_zones: instagram
 
 rules:
-  do: []
+  do:
+    - "consumer copy talks about understanding a document: understand, review, check the sources, know what to ask, know what you're signing"
+    - "hook in the first 1-3 seconds; one message per video"
   dont:
     - "never cut jokes"
     - "never show competitor names"
+    - "never invent HAQQ screens or interface text; product UI only from supplied assets"
+    - "never say: is this legal, can they do this, you should, what are my rights, you don't need a lawyer"
 
 editing:
   breath: 0.12

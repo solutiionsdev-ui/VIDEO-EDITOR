@@ -24,7 +24,7 @@ from .. import audio_analysis as aa
 from ..job import Job, console, fmt_clock, fmt_time
 from ..media import decode_audio, run_ffmpeg
 from ..profile import get
-from ..text import ends_sentence, is_filler, preview
+from ..text import ends_sentence, is_filler, join_words, preview
 
 OUTPUT = "cuts.json"
 PREVIEW = "previews/cut-preview.mp4"
@@ -138,7 +138,7 @@ def run(job: Job, profile: dict, show: bool = False, preview_video: bool = True)
     for i, s in enumerate(segments):
         s["id"] = i
         s["duration"] = round(s["end"] - s["start"], 3)
-        s["text"] = " ".join(w["w"] for w in s["words"])
+        s["text"] = join_words([w["w"] for w in s["words"]])
         s["n_words"] = len(s["words"])
         s["out_start"] = round(sum(x["duration"] for x in segments[:i]), 3)
 

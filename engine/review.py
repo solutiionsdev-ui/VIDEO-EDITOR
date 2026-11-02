@@ -127,6 +127,7 @@ def render(job: Job) -> str:
         _takes(job),
         _cuts(job),
         _face(job),
+        _beats(job),
     ]
     refresh = '<meta http-equiv="refresh" content="10">' if running else ""
     return f"""<!doctype html>
@@ -275,6 +276,43 @@ def _face(job: Job) -> str:
             f"<ul class=issues>{notes}</ul></div></div></section>")
 
 
+def _beats(job: Job) -> str:
+    if not job.has("beats.json"):
+        waiting = job.has("beats-request.json") or job.has("beats-request.md")
+        hint = ("The plan is waiting for Claude: <code>beats-request.md</code> is written, <code>beats-plan.json</code> is not yet."
+                if waiting else "Run <code>./reel beats jobs/…</code>")
+        return f"<section><h2>7 · Beat board {_badge('not run yet', 'none')}</h2><p class=dim>{hint}</p></section>"
+    from .stages.beats import graphic_line
+
+    d = job.read_json("beats.json")
+    cards = []
+    for b in d["beats"]:
+        cap = b["caption"]["style"] + (" · ★ " + ", ".join(b["caption"]["highlight"]) if b["caption"]["highlight"] else "")
+        g = b.get("graphic")
+        gline = esc(graphic_line(g)) if g else '<span class=dim>no graphic</span>'
+        broll = f"<div class=dim>B-roll: {esc(b['broll'].get('file'))}</div>" if b.get("broll") else ""
+        cards.append(
+            f"<div class=card><div class=beathead><strong>Beat {b['id']}</strong> "
+            f"<span class=mono>{fmt_time(b['start'])}–{fmt_time(b['end'])} · {b['duration']:.1f}s</span> "
+            f"{_badge(b['layout'], 'none')} <span class=dim>take {esc(b['take_used'])}</span></div>"
+            f"<p class=line dir=auto>{esc(b['text'])}</p>"
+            f"<div><strong>Graphic:</strong> {gline}</div>"
+            f"<div><strong>Captions:</strong> {esc(cap)}</div>{broll}"
+            f"<div class=dim>{esc(b.get('note', ''))}</div></div>")
+    m = d.get("music", {})
+    notes = "".join(f"<li class=warn-text>{esc(w)}</li>" for w in d.get("warnings", []))
+    usage = ""
+    if d.get("usage"):
+        u = d["usage"]
+        usage = (f"<p class=dim>Claude: {esc(u.get('model'))} · {u['input_tokens']} tokens in "
+                 f"({u['cache_read_input_tokens']} cached) · {u['output_tokens']} out · {u.get('seconds')}s</p>")
+    return (f"<section><h2>7 · Beat board <span class=dim>{esc(d['summary'])}</span></h2>"
+            f"<p><strong>{esc(d.get('title', ''))}</strong> — {esc(d.get('hook', ''))}</p>"
+            f"<p class=dim>Music: {esc(m.get('mood', '?'))} · {esc(m.get('bpm', '?'))} bpm · {esc(m.get('energy', '?'))} energy · "
+            f"{esc(m.get('ducking_db'))} dB under voice · planned by {esc(d.get('generated_by'))}</p>{usage}"
+            f"<ul class=issues>{notes}</ul>{''.join(cards)}</section>")
+
+
 def _video(job: Job, rel: str) -> str:
     if not (job.path / rel).is_file():
         return f"<p class=dim>No preview video ({esc(rel)}). Re-run the stage without --no-preview.</p>"
@@ -305,6 +343,7 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;le
 video{width:100%;max-height:""" + str(PREVIEW_HEIGHT) + """px;border-radius:12px;background:#000}
 ul.issues{padding-left:20px}.err{color:var(--bad);font-size:13px}code{background:var(--card);padding:1px 6px;border-radius:6px}
 .script{white-space:pre-wrap;background:var(--card);padding:12px 16px;border-radius:12px}details summary{cursor:pointer;color:var(--muted)}
+.beathead{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.line{font-size:16px;margin:8px 0}
 footer{margin-top:48px;font-size:12px}
 @media (max-width:760px){.grid{grid-template-columns:1fr}h1{font-size:20px}}
 """

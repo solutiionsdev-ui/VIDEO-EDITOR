@@ -36,3 +36,13 @@ face:
   detect_width: 384          # frames are shrunk to this width before detection
   no_go_margin: 0.06         # extra margin (fraction of frame) around the face box
   max_gap_s: 1.0             # missing detections shorter than this are interpolated
+
+beats:
+  min_s: 1.5                 # usual beat length
+  max_s: 4.0
+  hard_max_s: 6.5            # a beat longer than this is rejected
+
+ai:
+  model: claude-sonnet-5-5   # the planner; use claude-opus-5-5 if Sonnet's plans aren't good enough
+  effort: high
+  planner: auto              # auto | api | manual — auto uses the API when credentials exist, else Claude Code

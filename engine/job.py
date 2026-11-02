@@ -18,7 +18,7 @@ from rich.console import Console
 
 console = Console(highlight=False)
 
-STAGES = ["intake", "audio", "transcribe", "takes", "cuts", "face"]
+STAGES = ["intake", "audio", "transcribe", "takes", "cuts", "face", "beats"]
 
 RAW_EXTENSIONS = {".mp4", ".mov", ".m4v", ".hevc", ".avi", ".mkv", ".webm", ".mts", ".3gp"}
 

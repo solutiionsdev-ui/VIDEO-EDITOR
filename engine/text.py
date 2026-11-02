@@ -80,6 +80,47 @@ def stumbles(words: list[str]) -> int:
     return count
 
 
+_NO_SPACE_BEFORE = set(",.;:%!?)]}’'،؛؟")
+_NO_SPACE_AFTER = set("($[{")
+
+_NUMBER_WORDS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7",
+    "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "fifteen": "15", "twenty": "20",
+    "thirty": "30", "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70", "eighty": "80", "ninety": "90",
+    "hundred": "100", "thousand": "1000", "million": "1000000",
+    "صفر": "0", "واحد": "1", "اثنين": "2", "ثلاثة": "3", "اربعة": "4", "خمسة": "5", "ستة": "6", "سبعة": "7",
+    "ثمانية": "8", "تسعة": "9", "عشرة": "10", "عشرين": "20", "ثلاثين": "30", "اربعين": "40", "خمسين": "50",
+    "مية": "100", "مائة": "100", "الف": "1000", "مليون": "1000000",
+}
+
+
+def join_words(words: list[str]) -> str:
+    """Join transcript words without spaces before punctuation ("$800" + ",000" → "$800,000")."""
+    out = ""
+    for w in words:
+        w = w.strip()
+        if not w:
+            continue
+        if not out:
+            out = w
+            continue
+        prev = out[-1]
+        tight = (w[0] in _NO_SPACE_BEFORE
+                 or prev in _NO_SPACE_AFTER
+                 or (w[0] == "-" and len(w) > 1 and w[1].isdigit() and prev.isdigit()))
+        out += w if tight else " " + w
+    return out
+
+
+def number_tokens(text: str) -> set[str]:
+    """Numbers in a text as digit strings, spelled-out words included ("six" → "6")."""
+    found = {re.sub(r"[^\d]", "", m) for m in re.findall(r"\d[\d,.]*", text)}
+    for tok in normalize(text).split():
+        if tok in _NUMBER_WORDS:
+            found.add(_NUMBER_WORDS[tok])
+    return found - {""}
+
+
 def preview(text: str, n: int = 60) -> str:
     text = _SPACES.sub(" ", text.strip())
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"

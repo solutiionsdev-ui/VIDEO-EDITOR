@@ -20,7 +20,7 @@ from rich.table import Table
 from . import __version__
 from .job import STAGES, Job, JobError, console
 from .profile import load_profile
-from .stages import audio, cuts, face, intake, takes, transcribe
+from .stages import audio, beats, cuts, face, intake, takes, transcribe
 
 STAGE_MODULES = {
     "intake": intake,
@@ -29,6 +29,7 @@ STAGE_MODULES = {
     "takes": takes,
     "cuts": cuts,
     "face": face,
+    "beats": beats,
 }
 NEEDS = {
     "audio": "intake.json",
@@ -36,6 +37,7 @@ NEEDS = {
     "takes": "transcript.json",
     "cuts": "takes.json",
     "face": "cuts.json",
+    "beats": "face.json",
 }
 
 
@@ -47,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         return args.func(args) or 0
+    except beats.NeedsOperator as e:
+        console.print(f"[yellow bold]Needs Claude:[/] {e}")
+        return beats.NEEDS_OPERATOR
     except JobError as e:
         console.print(f"[red bold]Error:[/] {e}")
         return 2
@@ -76,11 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--show", action="store_true", help="print the result in detail")
         if name in ("cuts", "face"):
             sp.add_argument("--no-preview", action="store_true")
+        if name == "beats":
+            sp.add_argument("--planner", choices=["auto", "api", "manual"], default=None,
+                            help="auto: Claude API if credentials exist, else Claude Code writes the plan")
+            sp.add_argument("--force", action="store_true", help="plan again even if beats-plan.json exists")
         sp.set_defaults(func=cmd_stage, stage=name)
 
-    show = sub.add_parser("show", help="print an existing result (intake, transcript, takes, cuts, face)")
+    show = sub.add_parser("show", help="print an existing result (intake, transcript, takes, cuts, face, beats)")
     show.add_argument("job")
-    show.add_argument("stage", choices=["intake", "transcript", "transcribe", "takes", "cuts", "face"])
+    show.add_argument("stage", choices=["intake", "transcript", "transcribe", "takes", "cuts", "face", "beats"])
     show.set_defaults(func=cmd_show)
 
     status = sub.add_parser("status", help="which stages have run on a job")
@@ -116,23 +125,28 @@ def _open(args) -> tuple[Job, dict]:
     return job, profile
 
 
-def _run_one(job: Job, profile: dict, stage: str, show: bool, preview: bool = True):
+def _run_one(job: Job, profile: dict, stage: str, show: bool, preview: bool = True,
+             planner: str | None = None, force: bool = False):
     need = NEEDS.get(stage)
     if need and not job.has(need):
         raise JobError(f"'{stage}' needs {need}. Run the earlier stages first (or `reel run {job.path}`).")
     module = STAGE_MODULES[stage]
     kwargs = {}
-    if stage in ("transcribe", "takes", "cuts", "face"):
+    if stage in ("transcribe", "takes", "cuts", "face", "beats"):
         kwargs["show"] = show
     if stage in ("cuts", "face"):
         kwargs["preview_video"] = preview
+    if stage == "beats":
+        kwargs["planner"] = planner or str(profile.get("ai", {}).get("planner", "auto"))
+        kwargs["force"] = force
     return job.run_stage(stage, module.run, profile, **kwargs)
 
 
 def cmd_stage(args) -> int:
     job, profile = _open(args)
     preview = not getattr(args, "no_preview", False)
-    result = _run_one(job, profile, args.stage, args.show, preview)
+    result = _run_one(job, profile, args.stage, args.show, preview,
+                      planner=getattr(args, "planner", None), force=getattr(args, "force", False))
     if args.stage == "intake" and result["status"] == "blocked":
         return 3
     return 0
@@ -164,6 +178,10 @@ def cmd_run(args) -> int:
             else:
                 console.print("\n[red bold]Stopped:[/] intake found blockers. Fix them, or re-run with --force.")
                 return 3
+        elif stage == "beats" and code == beats.NEEDS_OPERATOR:
+            console.print("\n[yellow bold]Paused:[/] the beat plan is waiting for Claude (see above). "
+                          "Everything before it is done.")
+            break
         elif code != 0:
             console.print(f"\n[red bold]Stopped:[/] stage '{stage}' failed (see above).")
             return code
@@ -174,6 +192,8 @@ def cmd_run(args) -> int:
         cuts.report(job, job.read_json("cuts.json"))
     if job.has("face.json"):
         face.report(job, job.read_json("face.json"))
+    if job.has("beats.json"):
+        beats.report(job, job.read_json("beats.json"))
     cmd_status(args)
     return 0
 
@@ -182,7 +202,8 @@ def cmd_show(args) -> int:
     job = Job(Path(args.job))
     stage = {"transcribe": "transcript"}.get(args.stage, args.stage)
     files = {"intake": ("intake.json", intake), "transcript": ("transcript.json", transcribe),
-             "takes": ("takes.json", takes), "cuts": ("cuts.json", cuts), "face": ("face.json", face)}
+             "takes": ("takes.json", takes), "cuts": ("cuts.json", cuts), "face": ("face.json", face),
+             "beats": ("beats.json", beats)}
     name, module = files[stage]
     module.report(job, job.read_json(name))
     return 0
@@ -196,7 +217,7 @@ def cmd_status(args) -> int:
     table.add_column("time", justify="right")
     table.add_column("result")
     outputs = {"intake": "intake.json", "audio": "audio/index.json", "transcribe": "transcript.json",
-               "takes": "takes.json", "cuts": "cuts.json", "face": "face.json"}
+               "takes": "takes.json", "cuts": "cuts.json", "face": "face.json", "beats": "beats.json"}
     for stage in STAGES:
         entry = job.state.get("stages", {}).get(stage, {})
         status = entry.get("status", "—")

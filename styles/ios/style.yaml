@@ -1,0 +1,106 @@
+# iOS style — the first style in the library.
+#
+# Look: the clean iOS system aesthetic from the HAQQ reference reel. White cards, pills and
+# widgets with soft shadows, bold sans-serif headlines (the client's font), one accent colour
+# doing all the emphasis, everything else neutral. Over the client's footage the widgets float in
+# the free zone around the face; on a white card the footage itself becomes a rounded card.
+# Captions are word by word, the active word in the accent colour.
+#
+# This file is the contract between the beat planner (stage 7) and the renderer (stages 8/10):
+# the planner may only pick layouts and components listed here, with these props.
+
+name: ios
+title: iOS
+reference: "HAQQ #1 reel: time pills, chat window, term-sheet card, suggested-edit card with Accept/Dismiss, email card, phone mockup; Poppins; wine/navy accents on soft white"
+
+layouts:
+  face-full:
+    description: >
+      The footage fills the frame (9:16 crop from face.json). One widget at a time floats in the free
+      zone above or below the face, never over the no-go box. Captions sit in the lower third.
+      The default layout; use it for anything personal, direct, or emotional.
+    graphic_anchors: [top, bottom]
+  white-card:
+    description: >
+      Soft white background tinted with the brand colour. The footage sits in a rounded card in the
+      upper part of the frame; the widget sits below it; captions sit under the card. Use it for
+      explanations, lists, numbers and step-by-step moments. Never two white-card beats for a single
+      short remark; group them into runs of 2-4 beats so the layout change feels intentional.
+    footage_card: { x: 0.07, y: 0.08, w: 0.86, h: 0.50, radius: 48 }
+    graphic_anchors: [below-card]
+    max_share: 0.40          # of beats, unless the client profile says otherwise
+
+components:
+  headline:
+    description: Big bold text, 1-5 words. One word may be highlighted in the accent colour. The hook of the video is usually a headline.
+    props: { text: "1-5 words", highlight: "optional word from text" }
+    text_fields: [text]
+  ios-notification:
+    description: iOS notification banner — app name, title, one-line body, time. For messages, reminders, alerts, "a client asks…" moments.
+    props: { app: "e.g. Messages", title: "sender or title", body: "short line", time: "e.g. 21:41" }
+    text_fields: [title, body]
+  ios-message:
+    description: One or two chat bubbles. Incoming grey, outgoing in the accent colour. For quoting what someone said or asked.
+    props: { bubbles: "list of {text, direction: in|out}" }
+    text_fields: [bubbles]
+  ios-progress:
+    description: A labelled progress bar that animates from one value to another, e.g. "Hook rate 0% → 67%". For change, growth, work being done.
+    props: { label: "short label", from: "number 0-100", to: "number 0-100", unit: "%" }
+    text_fields: [label]
+  ios-stat:
+    description: One big number with a short label, counts up on entry. Optional delta with an arrow. For results, money, percentages, counts.
+    props: { value: "e.g. $800,000 or 40%", label: "2-4 words", delta: "optional, e.g. -40%", trend: "up|down|none" }
+    text_fields: [value, label]
+  ios-list:
+    description: A card with a title and 2-5 short items that appear one by one (check marks or numbers). For "three things", steps, a weekly routine.
+    props: { title: "optional, 1-3 words", items: "list of 2-5 items, each 1-4 words", marker: "check|number|dot" }
+    text_fields: [title, items]
+  ios-toggle:
+    description: A settings row with a switch that flips on (or off). For decisions, habits, "I stopped doing X".
+    props: { label: "2-5 words", state: "on|off" }
+    text_fields: [label]
+  ios-card:
+    description: A term-sheet style card — a small eyebrow, a title, then up to 4 label/value rows. For structured facts.
+    props: { eyebrow: "optional", title: "2-5 words", rows: "list of {label, value}, up to 4" }
+    text_fields: [title, rows]
+  ios-suggested-edit:
+    description: 'A "Suggested edit" card with a line of text and Accept / Dismiss buttons; Accept gets pressed. For improvements, corrections, feedback moments.'
+    props: { text: "the suggestion, 3-10 words", accept: true }
+    text_fields: [text]
+  before-after:
+    description: Two lines — the old line struck through, the new line in the accent colour. For "was X, now Y".
+    props: { before: "2-6 words", after: "2-6 words" }
+    text_fields: [before, after]
+  ios-timer:
+    description: A time pill ("21:41"), a countdown ("6h → 12 min") or a date. For deadlines, time saved, schedules.
+    props: { text: "e.g. 21:41 or 6h → 12 min" }
+    text_fields: [text]
+  logo-end-card:
+    description: The client's logo on the brand colour, with an optional call to action. Only for the last beat.
+    props: { cta: "optional, 2-6 words" }
+    text_fields: [cta]
+
+captions:
+  mode: word-by-word          # every word appears on its own time, the active word in the accent colour
+  max_words_per_line: 4
+  max_lines: 2
+  position: lower-third        # face-full: lower third, always outside no_go; white-card: under the card
+  styles:
+    normal: client's caption font, size and colours from the profile
+    emphasis: same, 15% larger, used for the hook and the payoff lines only
+  arabic: right-to-left, English words kept in Latin script
+
+motion:
+  widget_in: "slide up 24px + fade, 320 ms, spring"
+  widget_out: "fade, 200 ms"
+  widget_hold: "1.5-4 s; at most one widget on screen at a time"
+  layout_switch: "cross-dissolve 240 ms"
+  first_beat: "no widget in the first 0.4 s; the hook line itself is the graphic"
+
+rules:
+  - At most 5 words of graphic text on screen at once (captions do not count).
+  - One widget at a time. Not every beat needs a graphic: 40-60% of beats with no widget is normal.
+  - Graphics must never cover the no-go box from face.json.
+  - Never invent product screens or interface text. Product UI only from the client's assets.
+  - Emphasis comes from one accent colour (brand.colours.primary). Text on white is the secondary brand colour; text on footage is white.
+  - Numbers, names and quotes in a graphic must come from what is said in that beat or the client's brief, never made up.
