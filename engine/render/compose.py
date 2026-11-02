@@ -73,9 +73,15 @@ def extract_frames(video: Path, start_frame: int, count: int, out_dir: Path, fps
                 "-start_number", "0", str(out_dir / "%05d.jpg")])
 
 
+ENCODE_VERSION = 2   # bump when the encoding below changes, so cached beats are redone
+
+
 def encode_frames(frames_dir: Path, out: Path, fps: int = FPS, crf: int = 18) -> Path:
+    """JPEG frames → H.264. JPEGs are full-range; convert to the limited range players expect."""
     out.parent.mkdir(parents=True, exist_ok=True)
     run_ffmpeg(["-framerate", str(fps), "-i", str(frames_dir / "%05d.jpg"),
+                "-vf", "scale=in_range=pc:out_range=tv,format=yuv420p",
+                "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
                 "-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-pix_fmt", "yuv420p", "-r", str(fps), str(out)])
     return out
 

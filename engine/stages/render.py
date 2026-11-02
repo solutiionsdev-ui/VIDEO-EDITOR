@@ -127,7 +127,8 @@ def run(job: Job, profile: dict, show: bool = False, workers: int | None = None)
 
 
 def _key(spec: dict, f0: int, f1: int, base_fp: str, renderer_fp: str) -> str:
-    payload = json.dumps({"spec": spec, "frames": [f0, f1], "base": base_fp, "renderer": renderer_fp}, sort_keys=True)
+    payload = json.dumps({"spec": spec, "frames": [f0, f1], "base": base_fp, "renderer": renderer_fp,
+                          "encode": compose.ENCODE_VERSION}, sort_keys=True)
     return hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 

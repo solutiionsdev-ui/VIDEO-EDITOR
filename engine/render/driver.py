@@ -111,8 +111,15 @@ def brand_spec(profile: dict) -> dict:
 def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last: bool) -> dict:
     """Everything the page needs to render one beat, with times relative to the beat start."""
     caps = profile.get("captions", {}) or {}
-    words = [{"w": w["w"], "start": round(w["start"] - beat["start"], 3), "end": round(w["end"] - beat["start"], 3)}
-             for w in beat.get("words", [])]
+    words: list[dict] = []
+    for w in beat.get("words", []):
+        token = {"w": w["w"], "start": round(w["start"] - beat["start"], 3), "end": round(w["end"] - beat["start"], 3)}
+        # Whisper emits "%" "," "." as their own words; glue them to the word before for the captions.
+        if words and not re.search(r"[\w]", token["w"], re.UNICODE):
+            words[-1]["w"] += token["w"]
+            words[-1]["end"] = token["end"]
+        else:
+            words.append(token)
     return {
         "width": WIDTH, "height": HEIGHT, "fps": FPS,
         "style": {"layouts": style.get("layouts", {}), "motion_first_beat_delay": 0.4},
