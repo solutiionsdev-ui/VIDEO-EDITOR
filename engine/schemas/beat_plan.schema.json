@@ -25,6 +25,7 @@
         "additionalProperties": false,
         "required": ["from", "to", "layout", "graphic", "caption_style", "highlight_words", "broll", "note"],
         "properties": {
+          "name": { "type": "string", "description": "Optional 1-3 word name for the beat board, e.g. Hook, The brief" },
           "from": { "type": "integer", "minimum": 1, "description": "First candidate id in this beat" },
           "to": { "type": "integer", "minimum": 1, "description": "Last candidate id in this beat (inclusive)" },
           "layout": { "type": "string", "enum": ["face-full", "white-card"] },

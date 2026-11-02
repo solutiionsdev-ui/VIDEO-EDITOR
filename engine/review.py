@@ -1,9 +1,9 @@
-"""Local review page: `reel view <job>` serves a read-only page on localhost.
+"""Local review page: `reel view <job>` serves the Beat Board on localhost.
 
-It shows every stage's result (intake, transcript, takes, cut list, face
-tracking) and plays the preview videos inline. It only reads the job folder
-and only listens on 127.0.0.1. Not the Phase 3 web app — a quick way to check
-results without opening JSON files.
+Dark "shot panel" layout: the full sequence with a beat scrubber, the beats
+table, every shot as a card with Replay, the on-screen copy to approve, and
+the engine's own results (intake, transcript, takes, cut list, face tracking)
+folded underneath. It only reads the job folder and only listens on 127.0.0.1.
 """
 
 from __future__ import annotations
@@ -20,8 +20,6 @@ from urllib.parse import unquote, urlsplit
 
 from .job import STAGES, Job, console, fmt_clock, fmt_time
 from .profile import load_profile
-
-PREVIEW_HEIGHT = 560
 
 
 def esc(x) -> str:
@@ -116,36 +114,189 @@ def render(job: Job) -> str:
         profile = load_profile(client)
     except Exception:  # noqa: BLE001 - a missing profile must not break the page
         profile = load_profile(None)
-    accent = str(profile.get("brand", {}).get("colours", {}).get("primary") or "#66023C")
+    colours = profile.get("brand", {}).get("colours", {}) or {}
+    accent = str(colours.get("primary") or "#66023C")
     client_name = profile.get("client", {}).get("name") or client or "no client profile"
+    font = str(profile.get("captions", {}).get("font") or "Poppins")
     running = any(s.get("status") == "running" for s in job.state.get("stages", {}).values())
 
-    sections = [
-        _stages(job),
-        _intake(job),
-        _transcript(job),
-        _takes(job),
-        _cuts(job),
-        _face(job),
-        _beats(job),
+    beats = job.read_json("beats.json") if job.has("beats.json") else None
+    cuts = job.read_json("cuts.json") if job.has("cuts.json") else None
+    video = _sequence_video(job)
+
+    body = [
+        _hero(job, client_name, beats, cuts, profile),
+        _sequence(job, beats, cuts, video),
+        _beats_table(beats),
+        _shots(job, beats),
+        _copy(beats, client_name),
+        _engine(job),
     ]
     refresh = '<meta http-equiv="refresh" content="10">' if running else ""
+    font_q = font.replace(" ", "+")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{esc(job.name)} · Studiio review</title>{refresh}
-<style>{_CSS.replace('ACCENT', esc(accent))}</style></head>
+<title>{esc(beats.get('title') if beats else job.name)} · Studiio</title>{refresh}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family={font_q}:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>{_CSS.replace('ACCENT', esc(accent)).replace('FONT', esc(font))}</style></head>
 <body><main>
-<header><div class="eyebrow">Studiio Reel Editor · review</div>
-<h1>{esc(job.name)} <span class="dim">· {esc(client_name)}</span></h1>
-<p class="dim">Read-only view of the job folder. Re-run a stage in the terminal, then reload this page.
-{'<strong>A stage is running — this page refreshes every 10 s.</strong>' if running else ''}</p></header>
-{''.join(sections)}
-<footer class="dim">./reel view · {esc(job.path)}</footer>
-</main></body></html>"""
+{''.join(body)}
+<footer class="dim">./reel view · {esc(job.path)}{' · a stage is running, refreshing every 10 s' if running else ''}</footer>
+</main>
+<script>{_JS}</script>
+</body></html>"""
+
+
+def _sequence_video(job: Job) -> str | None:
+    renders = sorted((job.path / "renders").glob("v*.mp4")) if (job.path / "renders").is_dir() else []
+    if renders:
+        return f"renders/{renders[-1].name}"
+    if (job.path / "previews" / "cut-preview.mp4").is_file():
+        return "previews/cut-preview.mp4"
+    return None
+
+
+def _pill(text: str) -> str:
+    return f'<span class="pill">{esc(text)}</span>'
 
 
 def _badge(text: str, kind: str) -> str:
     return f'<span class="badge {kind}">{esc(text)}</span>'
+
+
+def _hero(job: Job, client_name: str, beats: dict | None, cuts: dict | None, profile: dict) -> str:
+    version = beats.get("version", 1) if beats else 1
+    title = beats.get("title") if beats else job.name
+    lede = ""
+    if beats:
+        m = beats.get("music", {})
+        lede = (f"{esc(beats.get('hook', ''))} Music: {esc(m.get('mood', '—'))}, {esc(m.get('bpm', '—'))} bpm, "
+                f"{esc(m.get('energy', '—'))} energy, {esc(m.get('ducking_db'))} dB under the voice."
+                + (" A logo end card closes the reel." if beats.get("end_card") else ""))
+    elif cuts:
+        lede = "The cut is ready; the beat plan has not been written yet."
+    else:
+        lede = "No cut yet. Run the engine stages first."
+    pills = []
+    if cuts:
+        pills.append(_pill(f"{fmt_clock(cuts['summary']['seconds_out'])} edited"))
+        pills.append(_pill(f"raw {fmt_clock(cuts['summary']['seconds_in'])}"))
+    if beats:
+        pills.append(_pill(f"{len(beats['beats'])} beats"))
+        pills.append(_pill(f"{beats.get('style', 'ios')} style"))
+        pills.append(_pill(f"{sum(1 for b in beats['beats'] if b.get('graphic'))} graphics"))
+    aspect = str(profile.get("format", {}).get("aspect") or "9:16")
+    pills.append(_pill("1080×1920" if aspect == "9:16" else aspect))
+    return (f'<header class="hero"><div class="eyebrow">Studiio · {esc(client_name)} · beat board · v{version}</div>'
+            f'<h1>{esc(title)}</h1><p class="lede">{lede}</p><div class="pills">{"".join(pills)}</div></header>')
+
+
+def _sequence(job: Job, beats: dict | None, cuts: dict | None, video: str | None) -> str:
+    if not video:
+        return '<section><h2>Full sequence</h2><p class="dim">No preview video yet — run <code>./reel cuts jobs/…</code>.</p></section>'
+    duration = beats["duration"] if beats else (cuts["summary"]["seconds_out"] if cuts else 0)
+    marks = ""
+    data = "[]"
+    if beats:
+        marks = "".join(f'<i style="left:{(b["start"] / duration * 100):.3f}%"></i>' for b in beats["beats"][1:])
+        data = json.dumps([{"id": b["id"], "name": b["name"], "start": b["start"], "end": b["end"]} for b in beats["beats"]])
+    what = ("This is the render." if video.startswith("renders/") else
+            "This is the cut preview (the edit before graphics, captions and music). The render replaces it here once it exists.")
+    return f"""<section id="sequence"><h2>Full sequence</h2>
+<div class="player" id="player" data-beats='{esc(data)}' data-duration="{duration}">
+<video id="main" src="/{esc(video)}#t=0.1" preload="auto" playsinline></video>
+<div class="controls">
+<button id="play" class="btn">Play</button>
+<div class="scrub" id="scrub"><div class="track"><div class="fill" id="fill"></div>{marks}</div></div>
+<div class="time mono" id="time">0:00.0 / {fmt_time(duration)}</div>
+<div class="beatlabel" id="beatlabel">{esc('Beat 1 · ' + beats['beats'][0]['name']) if beats else ''}</div>
+</div></div>
+<p class="dim">{what}</p></section>"""
+
+
+def _beats_table(beats: dict | None) -> str:
+    if not beats:
+        return '<section id="beats"><h2>Beats</h2><p class="dim">Not planned yet — run <code>./reel beats jobs/…</code>.</p></section>'
+    from .stages.beats import graphic_line
+
+    rows = []
+    for b in beats["beats"]:
+        g = b.get("graphic")
+        sees = f"{esc(b['layout'])}"
+        if g:
+            sees += f" · {esc(graphic_line(g))}"
+        cap = b["caption"]["style"]
+        if b["caption"]["highlight"]:
+            cap += " · ★ " + ", ".join(b["caption"]["highlight"])
+        changed = b.get("changed") or b.get("note") or ""
+        rows.append(
+            f'<tr data-start="{b["start"]}" data-end="{b["end"]}"><td class="mono">{b["id"]}</td><td class="mono">{fmt_time(b["start"])}</td>'
+            f'<td class="mono">{b["duration"]:.2f} s</td><td class="name">{esc(b["name"])}</td>'
+            f'<td dir="auto"><div>{esc(b["text"])}</div><div class="dim">{sees} · captions {esc(cap)}'
+            f'{" · take " + esc(b["take_used"]) if b["take_used"] != "1 of 1" else ""}</div></td>'
+            f'<td class="dim">{esc(changed)}</td></tr>')
+    warn = "".join(f'<li class="warn-text">{esc(w)}</li>' for w in beats.get("warnings", []))
+    usage = ""
+    if beats.get("usage"):
+        u = beats["usage"]
+        usage = (f'<p class="dim">Planned by {esc(u.get("model"))}: {u["input_tokens"]} tokens in '
+                 f'({u["cache_read_input_tokens"]} cached), {u["output_tokens"]} out, {u.get("seconds")} s.</p>')
+    return (f'<section id="beats"><h2>Beats <span class="dim">{esc(beats["summary"])}</span></h2>{usage}'
+            f'<ul class="issues">{warn}</ul>'
+            f'<table class="beats"><thead><tr><th>#</th><th>start</th><th>dur</th><th>beat</th><th>what the viewer sees</th><th>note</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></section>')
+
+
+def _shots(job: Job, beats: dict | None) -> str:
+    if not beats:
+        return ""
+    from .stages.beats import graphic_line
+
+    cards = []
+    for b in beats["beats"]:
+        still = f"stills/beat-{b['id']:02d}.jpg"
+        thumb = f"previews/beats/beat-{b['id']:02d}.jpg"
+        img = still if (job.path / still).is_file() else (thumb if (job.path / thumb).is_file() else None)
+        pic = f'<img src="/{esc(img)}" alt="" loading="lazy">' if img else '<div class="noimg">no frame</div>'
+        g = b.get("graphic")
+        sub = f"{b['duration']:.2f} s · {esc(b['layout'])}" + (f" · {esc(graphic_line(g))}" if g else "")
+        cards.append(
+            f'<figure class="shot" data-id="{b["id"]}" data-start="{b["start"]}" data-end="{b["end"]}">'
+            f'<div class="frame">{pic}</div><div class="bar"><i></i></div>'
+            f'<figcaption><strong>Beat {b["id"]} · {esc(b["name"])}</strong> <span class="dim">{sub}</span>'
+            f'<div class="line" dir="auto">{esc(b["text"])}</div></figcaption>'
+            f'<button class="btn small replay" data-start="{b["start"]}" data-end="{b["end"]}">Replay</button></figure>')
+    kind = "Rendered stills, one per beat." if (job.path / "stills").is_dir() else \
+        "Frames from the cut preview for now; the renderer will replace them with the real stills, graphics in place."
+    return f'<section id="shots"><h2>Every shot</h2><p class="dim">{kind}</p><div class="grid">{"".join(cards)}</div></section>'
+
+
+def _copy(beats: dict | None, client_name: str) -> str:
+    if not beats:
+        return ""
+    from .stages.beats import graphic_copy
+
+    cards = []
+    for b in beats["beats"]:
+        text = graphic_copy(b.get("graphic"))
+        if not text:
+            continue
+        cards.append(f'<div class="copycard"><div class="copytext" dir="auto">{esc(text)}</div>'
+                     f'<div class="dim">Beat {b["id"]} · {esc(b["name"])} · {esc(b["graphic"]["component"])}</div></div>')
+    if not cards:
+        return ""
+    return (f'<section id="copy"><h2>Copy for {esc(client_name)} to approve</h2>'
+            f'<p class="dim">Every word a graphic puts on screen. Captions are the spoken words and are not listed.</p>'
+            f'<div class="copygrid">{"".join(cards)}</div></section>')
+
+
+# -- engine details ----------------------------------------------------------
+
+def _engine(job: Job) -> str:
+    inner = _stages(job) + _intake(job) + _transcript(job) + _takes(job) + _cuts(job) + _face(job)
+    return (f'<details class="engine"><summary>Engine details — stages, intake, transcript, takes, cut list, face tracking</summary>'
+            f'{inner}</details>')
 
 
 def _stages(job: Job) -> str:
@@ -157,7 +308,7 @@ def _stages(job: Job) -> str:
         secs = f"{e['seconds']}s" if e.get("seconds") is not None else ""
         err = f'<div class="err">{esc(e.get("error"))}</div>' if e.get("error") else ""
         rows.append(f"<tr><td>{esc(stage)}</td><td>{_badge(status, kind)}{err}</td><td class=mono>{secs}</td></tr>")
-    return f"<section><h2>Stages</h2><table class=compact><tr><th>stage</th><th>status</th><th>time</th></tr>{''.join(rows)}</table></section>"
+    return f"<section><h3>Stages</h3><table class=compact><tr><th>stage</th><th>status</th><th>time</th></tr>{''.join(rows)}</table></section>"
 
 
 def _intake(job: Job) -> str:
@@ -177,7 +328,7 @@ def _intake(job: Job) -> str:
     issues = "".join(
         f"<li class={ {'blocker': 'bad-text', 'warning': 'warn-text', 'info': 'dim'}[i['level']] }>{esc(i['message'])}</li>"
         for i in d["issues"]) or "<li class=ok-text>No problems found.</li>"
-    return (f"<section><h2>1 · Intake {_badge(d['status'], kind)} <span class=dim>raw footage {fmt_clock(d['total_raw_seconds'])}</span></h2>"
+    return (f"<section><h3>1 · Intake {_badge(d['status'], kind)} <span class=dim>raw footage {fmt_clock(d['total_raw_seconds'])}</span></h3>"
             f"<table><tr><th>file</th><th>length</th><th>video</th><th>audio</th></tr>{''.join(rows)}</table>"
             f"<ul class=issues>{issues}</ul></section>")
 
@@ -193,12 +344,11 @@ def _transcript(job: Job) -> str:
             flag = _badge("suspect", "warn") if s.get("suspect") else ""
             rows.append(f"<tr><td class=mono>{esc(s['id'])}</td><td class=mono>{fmt_time(s['start'])}–{fmt_time(s['end'])}</td>"
                         f"<td dir=auto>{esc(s['text'])} {flag}</td></tr>")
-        parts.append(f"<h3>{esc(src['file'])} <span class=dim>· language {esc(src['language'])} · {len(src['segments'])} lines</span></h3>"
+        parts.append(f"<h4>{esc(src['file'])} <span class=dim>· language {esc(src['language'])} · {len(src['segments'])} lines</span></h4>"
                      f"<table><tr><th>#</th><th>time</th><th>line</th></tr>{''.join(rows)}</table>")
     stats = d.get("stats", {})
-    open_attr = " open" if stats.get("segments", 0) <= 40 else ""
-    return (f"<section><h2>3 · Transcript <span class=dim>{stats.get('words', '?')} words · model {esc(d.get('model'))}</span></h2>"
-            f"<details{open_attr}><summary>Show every line</summary>{''.join(parts)}</details></section>")
+    return (f"<section><h3>3 · Transcript <span class=dim>{stats.get('words', '?')} words · model {esc(d.get('model'))}</span></h3>"
+            f"<details><summary>Show every line</summary>{''.join(parts)}</details></section>")
 
 
 def _takes(job: Job) -> str:
@@ -227,8 +377,8 @@ def _takes(job: Job) -> str:
         units = {u["id"]: u for u in d["units"]}
         items = "".join(f"<li><span class=mono>{fmt_time(units[i]['start'])}</span> <span dir=auto>“{esc(units[i]['text'])}”</span></li>"
                         for i in d["dropped_suspect"])
-        dropped = f"<h3>Dropped as probably-not-speech</h3><ul>{items}</ul>"
-    return f"<section><h2>4 · Takes <span class=dim>{esc(head)}</span></h2>{''.join(groups)}{dropped}</section>"
+        dropped = f"<h4>Dropped as probably-not-speech</h4><ul>{items}</ul>"
+    return f"<section><h3>4 · Takes <span class=dim>{esc(head)}</span></h3>{''.join(groups)}{dropped}</section>"
 
 
 def _cuts(job: Job) -> str:
@@ -236,17 +386,17 @@ def _cuts(job: Job) -> str:
         return _empty("Cut list", "./reel cuts jobs/… --show")
     d = job.read_json("cuts.json")
     s = d["summary"]
-    labels = {"pause": "pauses", "filler": "filler words", "rejected_take": "rejected takes", "lead": "lead-in", "tail": "tail"}
+    labels = {"pause": "pauses", "filler": "filler words", "rejected_take": "rejected takes", "suspect": "hallucinated lines",
+              "lead": "lead-in", "tail": "tail"}
     removed = ", ".join(f"{v['count']} {labels.get(k, k)} ({v['seconds']:.1f}s)" for k, v in s["removed"].items())
     rows = "".join(
         f"<tr><td class=mono>{seg['id'] + 1}</td><td class=mono>{fmt_time(seg['start'])} → {fmt_time(seg['end'])}</td>"
         f"<td class=mono>{seg['duration']:.1f}s</td><td class=mono>{fmt_time(seg['out_start'])}</td><td dir=auto>{esc(seg['text'])}</td></tr>"
         for seg in d["segments"])
-    video = _video(job, "previews/cut-preview.mp4")
-    return (f"<section><h2>5 · Cut list <span class=dim>{s['segments']} segments · {fmt_clock(s['seconds_in'])} raw → "
-            f"<strong>{fmt_clock(s['seconds_out'])}</strong> edited</span></h2>"
+    return (f"<section><h3>5 · Cut list <span class=dim>{s['segments']} segments · {fmt_clock(s['seconds_in'])} raw → "
+            f"<strong>{fmt_clock(s['seconds_out'])}</strong> edited</span></h3>"
             f"<p class=dim>Removed: {esc(removed) or '—'}</p>"
-            f"<div class=grid><div>{video}</div><div><table><tr><th>#</th><th>raw in → out</th><th>dur</th><th>edited at</th><th>text</th></tr>{rows}</table></div></div>"
+            f"<table><tr><th>#</th><th>raw in → out</th><th>dur</th><th>edited at</th><th>text</th></tr>{rows}</table>"
             f"<details><summary>Final script</summary><p dir=auto class=script>{esc(d['script'])}</p></details></section>")
 
 
@@ -268,82 +418,104 @@ def _face(job: Job) -> str:
         notes += f"<li class=bad-text>No face at all in segments {esc(', '.join(str(i + 1) for i in s['segments_without_face']))}.</li>"
     if s["segments_low_coverage"]:
         notes += f"<li class=warn-text>Face found in under half the frames of segments {esc(', '.join(str(i + 1) for i in s['segments_low_coverage']))}.</li>"
-    video = _video(job, "previews/face-preview.mp4")
-    return (f"<section><h2>6 · Face tracking <span class=dim>{s['segments']} segments · {s['frames']} frames · "
-            f"face found in <strong>{s['detected_fraction']:.0%}</strong> of frames</span></h2>"
-            f"<p class=dim>Preview colours: green = raw detection, orange = smoothed track, red = no-go zone for graphics and captions, yellow = 9:16 crop.</p>"
-            f"<div class=grid><div>{video}</div><div><table><tr><th>#</th><th>time</th><th>found</th><th>face centre</th><th>no-go zone</th><th>9:16 crop</th></tr>{''.join(rows)}</table>"
+    video = ""
+    if (job.path / "previews" / "face-preview.mp4").is_file():
+        video = '<video controls preload="metadata" class="small" src="/previews/face-preview.mp4#t=0.5"></video>'
+    return (f"<section><h3>6 · Face tracking <span class=dim>{s['segments']} segments · {s['frames']} frames · "
+            f"face found in <strong>{s['detected_fraction']:.0%}</strong> of frames</span></h3>"
+            f"<p class=dim>Preview colours: green = raw detection, orange = smoothed track, red = no-go zone for graphics and captions.</p>"
+            f"<div class=facegrid>{video}<div><table><tr><th>#</th><th>time</th><th>found</th><th>face centre</th><th>no-go zone</th><th>9:16 crop</th></tr>{''.join(rows)}</table>"
             f"<ul class=issues>{notes}</ul></div></div></section>")
 
 
-def _beats(job: Job) -> str:
-    if not job.has("beats.json"):
-        waiting = job.has("beats-request.json") or job.has("beats-request.md")
-        hint = ("The plan is waiting for Claude: <code>beats-request.md</code> is written, <code>beats-plan.json</code> is not yet."
-                if waiting else "Run <code>./reel beats jobs/…</code>")
-        return f"<section><h2>7 · Beat board {_badge('not run yet', 'none')}</h2><p class=dim>{hint}</p></section>"
-    from .stages.beats import graphic_line
-
-    d = job.read_json("beats.json")
-    cards = []
-    for b in d["beats"]:
-        cap = b["caption"]["style"] + (" · ★ " + ", ".join(b["caption"]["highlight"]) if b["caption"]["highlight"] else "")
-        g = b.get("graphic")
-        gline = esc(graphic_line(g)) if g else '<span class=dim>no graphic</span>'
-        broll = f"<div class=dim>B-roll: {esc(b['broll'].get('file'))}</div>" if b.get("broll") else ""
-        cards.append(
-            f"<div class=card><div class=beathead><strong>Beat {b['id']}</strong> "
-            f"<span class=mono>{fmt_time(b['start'])}–{fmt_time(b['end'])} · {b['duration']:.1f}s</span> "
-            f"{_badge(b['layout'], 'none')} <span class=dim>take {esc(b['take_used'])}</span></div>"
-            f"<p class=line dir=auto>{esc(b['text'])}</p>"
-            f"<div><strong>Graphic:</strong> {gline}</div>"
-            f"<div><strong>Captions:</strong> {esc(cap)}</div>{broll}"
-            f"<div class=dim>{esc(b.get('note', ''))}</div></div>")
-    m = d.get("music", {})
-    notes = "".join(f"<li class=warn-text>{esc(w)}</li>" for w in d.get("warnings", []))
-    usage = ""
-    if d.get("usage"):
-        u = d["usage"]
-        usage = (f"<p class=dim>Claude: {esc(u.get('model'))} · {u['input_tokens']} tokens in "
-                 f"({u['cache_read_input_tokens']} cached) · {u['output_tokens']} out · {u.get('seconds')}s</p>")
-    return (f"<section><h2>7 · Beat board <span class=dim>{esc(d['summary'])}</span></h2>"
-            f"<p><strong>{esc(d.get('title', ''))}</strong> — {esc(d.get('hook', ''))}</p>"
-            f"<p class=dim>Music: {esc(m.get('mood', '?'))} · {esc(m.get('bpm', '?'))} bpm · {esc(m.get('energy', '?'))} energy · "
-            f"{esc(m.get('ducking_db'))} dB under voice · planned by {esc(d.get('generated_by'))}</p>{usage}"
-            f"<ul class=issues>{notes}</ul>{''.join(cards)}</section>")
-
-
-def _video(job: Job, rel: str) -> str:
-    if not (job.path / rel).is_file():
-        return f"<p class=dim>No preview video ({esc(rel)}). Re-run the stage without --no-preview.</p>"
-    return f'<video controls preload="auto" src="/{esc(rel)}#t=0.5"></video><div class=dim>{esc(rel)}</div>'
-
-
 def _empty(title: str, command: str) -> str:
-    return f"<section><h2>{esc(title)} {_badge('not run yet', 'none')}</h2><p class=dim>Run <code>{esc(command)}</code></p></section>"
+    return f"<section><h3>{esc(title)} {_badge('not run yet', 'none')}</h3><p class=dim>Run <code>{esc(command)}</code></p></section>"
 
 
 _CSS = """
-:root{--bg:#fff;--fg:#141414;--muted:#6b6b6b;--line:#e6e6e6;--card:#f6f6f7;--accent:ACCENT;
---ok-bg:#dcfce7;--ok:#15803d;--bad-bg:#fee2e2;--bad:#b91c1c;--warn-bg:#fef3c7;--warn:#a16207;--none-bg:#ececec;--none:#666}
-@media (prefers-color-scheme: dark){:root{--bg:#121214;--fg:#ececec;--muted:#9a9a9a;--line:#2a2a2e;--card:#1b1b1f;
---ok-bg:#14532d;--ok:#bbf7d0;--bad-bg:#7f1d1d;--bad:#fecaca;--warn-bg:#713f12;--warn:#fde68a;--none-bg:#2a2a2e;--none:#aaa}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-main{max-width:1120px;margin:0 auto;padding:24px 16px 48px}
-.eyebrow{color:var(--accent);font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:12px}
-h1{font-size:24px;margin:4px 0 8px}h2{font-size:17px;margin:40px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--line)}
-h2 .dim{font-weight:400;font-size:14px}h3{font-size:14px;margin:18px 0 6px}
-table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}table.compact{max-width:480px}
-.badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:700;vertical-align:middle}
+:root{color-scheme:dark;--bg:#111218;--panel:#181922;--card:#1c1d27;--line:#262835;--fg:#ececf1;--muted:#9a9fb0;
+--accent:ACCENT;--btn:#b85c8a;--btn-fg:#fff;--ok-bg:#14532d;--ok:#bbf7d0;--bad-bg:#7f1d1d;--bad:#fecaca;--warn-bg:#713f12;--warn:#fde68a;--none-bg:#262835;--none:#aab}
+*{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 "FONT",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:1160px;margin:0 auto;padding:28px 20px 60px}
+.eyebrow{color:var(--muted);font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:11px}
+h1{font-size:30px;font-weight:600;margin:6px 0 10px;letter-spacing:-.01em}h2{font-size:20px;font-weight:600;margin:44px 0 14px}
+h2 .dim{font-weight:400;font-size:14px;margin-left:8px}h3{font-size:16px;margin:28px 0 10px}h4{font-size:14px;margin:16px 0 6px}
+.lede{color:var(--muted);max-width:820px;margin:0 0 14px}
+.pills{display:flex;flex-wrap:wrap;gap:8px}.pill{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:500}
+.player{background:var(--panel);border-radius:16px;padding:10px}
+.player video{width:100%;max-height:72vh;background:#000;border-radius:12px;display:block;margin:0 auto}
+.controls{display:flex;align-items:center;gap:16px;padding:14px 6px 6px;flex-wrap:wrap}
+.btn{background:var(--btn);color:var(--btn-fg);border:0;border-radius:999px;padding:10px 24px;font:inherit;font-weight:600;cursor:pointer}
+.btn.small{padding:6px 16px;font-size:13px}.btn:hover{filter:brightness(1.1)}
+.scrub{flex:1;min-width:180px;cursor:pointer;padding:10px 0}.track{position:relative;height:4px;background:#3a3c4a;border-radius:2px}
+.fill{position:absolute;left:0;top:0;bottom:0;background:var(--btn);border-radius:2px;width:0}
+.track i{position:absolute;top:-3px;width:1px;height:10px;background:#6b6e80}
+.time{color:var(--muted);font-size:13px}.beatlabel{font-weight:600;font-size:14px;min-width:150px;text-align:right}
+table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em}table.compact{max-width:480px}
+table.beats td.name{font-weight:600;white-space:nowrap}table.beats tr.current td{background:#1f2030}table.beats tbody tr{cursor:pointer}
+.mono{font-variant-numeric:tabular-nums;white-space:nowrap}.dim{color:var(--muted)}
+.badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;vertical-align:middle}
 .ok{background:var(--ok-bg);color:var(--ok)}.bad{background:var(--bad-bg);color:var(--bad)}.warn{background:var(--warn-bg);color:var(--warn)}.none{background:var(--none-bg);color:var(--none)}
-.ok-text{color:var(--ok)}.bad-text{color:var(--bad)}.warn-text{color:var(--warn)}.dim{color:var(--muted)}.mono{font-variant-numeric:tabular-nums;white-space:nowrap}
-.card{background:var(--card);border-radius:12px;padding:12px 16px;margin:12px 0}.card table{margin-top:8px}
-.grid{display:grid;grid-template-columns:minmax(220px,340px) 1fr;gap:24px;align-items:start}
-video{width:100%;max-height:""" + str(PREVIEW_HEIGHT) + """px;border-radius:12px;background:#000}
-ul.issues{padding-left:20px}.err{color:var(--bad);font-size:13px}code{background:var(--card);padding:1px 6px;border-radius:6px}
-.script{white-space:pre-wrap;background:var(--card);padding:12px 16px;border-radius:12px}details summary{cursor:pointer;color:var(--muted)}
-.beathead{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.line{font-size:16px;margin:8px 0}
-footer{margin-top:48px;font-size:12px}
-@media (max-width:760px){.grid{grid-template-columns:1fr}h1{font-size:20px}}
+.ok-text{color:var(--ok)}.bad-text{color:var(--bad)}.warn-text{color:var(--warn)}ul.issues{padding-left:20px;margin:6px 0}ul.issues:empty{display:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:22px 24px}
+.shot{margin:0;background:var(--panel);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.shot.current{outline:2px solid var(--btn)}
+.frame{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:9/16;max-height:420px}.frame img{width:100%;height:100%;object-fit:cover;display:block}
+.noimg{color:var(--muted);display:flex;align-items:center;justify-content:center;height:100%}
+.bar{height:3px;background:#3a3c4a;border-radius:2px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--btn)}
+figcaption{font-size:14px}figcaption .line{color:var(--muted);font-size:13px;margin-top:4px}
+.shot .btn{align-self:center}
+.copygrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.copycard{background:var(--panel);border-radius:14px;padding:16px 18px}.copytext{font-size:17px;font-weight:600;margin-bottom:6px}
+details.engine{margin-top:56px;border-top:1px solid var(--line);padding-top:16px}details.engine>summary{cursor:pointer;color:var(--muted);font-weight:600}
+details summary{cursor:pointer;color:var(--muted)}.card{background:var(--card);border-radius:12px;padding:12px 16px;margin:12px 0}
+.script{white-space:pre-wrap;background:var(--card);padding:12px 16px;border-radius:12px}.err{color:var(--bad);font-size:13px}
+code{background:var(--card);padding:1px 6px;border-radius:6px}video.small{width:100%;max-width:320px;border-radius:12px;background:#000}
+.facegrid{display:grid;grid-template-columns:minmax(200px,320px) 1fr;gap:24px;align-items:start}
+footer{margin-top:56px;font-size:12px}
+@media (max-width:760px){.facegrid{grid-template-columns:1fr}h1{font-size:24px}.beatlabel{text-align:left}}
+"""
+
+_JS = """
+(function(){
+  const player = document.getElementById('player'); if (!player) return;
+  const video = document.getElementById('main'), play = document.getElementById('play'), fill = document.getElementById('fill');
+  const timeEl = document.getElementById('time'), label = document.getElementById('beatlabel'), scrub = document.getElementById('scrub');
+  const beats = JSON.parse(player.dataset.beats || '[]'); const duration = parseFloat(player.dataset.duration) || 0;
+  let stopAt = null;
+  const fmt = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ':' + (s - m * 60).toFixed(1).padStart(4, '0'); };
+  const beatAt = t => beats.find(b => t >= b.start && t < b.end) || (beats.length && t >= beats[beats.length-1].end ? beats[beats.length-1] : null);
+  function toggle(){ if (video.paused) { stopAt = null; video.play(); } else video.pause(); }
+  play.addEventListener('click', toggle);
+  video.addEventListener('click', toggle);
+  video.addEventListener('play', () => play.textContent = 'Pause');
+  video.addEventListener('pause', () => play.textContent = 'Play');
+  video.addEventListener('timeupdate', () => {
+    const t = video.currentTime, d = video.duration || duration;
+    fill.style.width = (d ? (t / d * 100) : 0) + '%';
+    timeEl.textContent = fmt(t) + ' / ' + fmt(d);
+    const b = beatAt(t);
+    if (b) label.textContent = 'Beat ' + b.id + ' · ' + b.name;
+    document.querySelectorAll('.shot').forEach(el => {
+      const s = parseFloat(el.dataset.start), e = parseFloat(el.dataset.end);
+      const on = t >= s && t < e; el.classList.toggle('current', on);
+      el.querySelector('.bar i').style.width = on ? ((t - s) / (e - s) * 100) + '%' : (t >= e ? '100%' : '0');
+    });
+    document.querySelectorAll('table.beats tbody tr').forEach(tr => {
+      tr.classList.toggle('current', t >= parseFloat(tr.dataset.start) && t < parseFloat(tr.dataset.end));
+    });
+    if (stopAt !== null && t >= stopAt) { video.pause(); stopAt = null; }
+  });
+  scrub.addEventListener('click', ev => {
+    const r = scrub.getBoundingClientRect(); const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+    video.currentTime = f * (video.duration || duration); stopAt = null;
+  });
+  function playRange(start, end, scroll){
+    stopAt = end - 0.05; video.currentTime = start + 0.01; video.play();
+    if (scroll) player.scrollIntoView({behavior: 'smooth', block: 'center'});
+  }
+  document.querySelectorAll('.replay').forEach(btn => btn.addEventListener('click', () => playRange(parseFloat(btn.dataset.start), parseFloat(btn.dataset.end), true)));
+  document.querySelectorAll('table.beats tbody tr').forEach(tr => tr.addEventListener('click', () => playRange(parseFloat(tr.dataset.start), parseFloat(tr.dataset.end), true)));
+})();
 """

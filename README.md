@@ -64,8 +64,11 @@ stage at a time:
 ./reel doctor                             # check ffmpeg, models and libraries
 ```
 
-`./reel view` opens a read-only page with every stage's result and the two preview videos
-playing inline — the easiest way to check a job. Leave it running and reload after re-running a stage.
+`./reel view` opens the Beat Board: the full sequence with a beat scrubber (Play, click the bar,
+click a beat row), the beats table, every shot as a card with a Replay button, and the on-screen copy
+the client has to approve. The engine's own results (intake, transcript, takes, cut list, face
+tracking) are folded underneath. Leave it running and reload after re-running a stage. Until the
+renderer exists the player shows the cut preview and the shot cards show frames from it.
 
 The client is remembered in the job's `job.json`, so `--client` is only needed the first time.
 

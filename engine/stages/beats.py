@@ -100,6 +100,9 @@ def run(job: Job, profile: dict, show: bool = False, planner: str = "auto", forc
         job.save_state()
     job.write_json(OUTPUT, result)
     job.log(f"  {result['summary']}")
+    made = thumbnails(job, result["beats"])
+    if made:
+        job.log(f"  {made} beat thumbnails → previews/beats/")
     if show:
         report(job, result)
     return result
@@ -228,6 +231,7 @@ OUTPUT_SHAPE = """{
   "music": {"mood": "from the client's preferences", "bpm": "e.g. 100-110", "energy": "low | medium | high"},
   "beats": [
     {
+      "name": "Hook",
       "from": 1, "to": 1,
       "layout": "face-full | white-card",
       "graphic": null  or  {"component": "ios-stat", "props": {"value": "$800,000", "label": "in sales", "trend": "up"}, "anchor": "top | bottom | below-card"},
@@ -513,12 +517,14 @@ def assemble(plan: dict, candidates: list[dict], style: dict, profile: dict, cut
         take = next((m["take_used"] for m in members if m["take_used"] != "1 of 1"), "1 of 1")
         if take != "1 of 1":
             swapped += 1
+        text = join_words([w["w"] for w in words])
         beats.append({
             "id": i,
+            "name": beat_name(b, text, i == 1),
             "start": members[0]["start"],
             "end": members[-1]["end"],
             "duration": round(members[-1]["end"] - members[0]["start"], 3),
-            "text": join_words([w["w"] for w in words]),
+            "text": text,
             "words": words,
             "candidates": [m["id"] for m in members],
             "segments": sorted({s for m in members for s in m["segments"]}),
@@ -553,6 +559,85 @@ def assemble(plan: dict, candidates: list[dict], style: dict, profile: dict, cut
         "warnings": warnings,
         "beats": beats,
     }
+
+
+def beat_name(b: dict, text: str, first: bool) -> str:
+    """A 1-3 word label for the beat board: the planner's name, else the graphic's text, else the line."""
+    if b.get("name"):
+        return str(b["name"]).strip()
+    if first:
+        return "Hook"
+    g = b.get("graphic")
+    if g:
+        p = g.get("props", {})
+        comp = g.get("component")
+        candidates = {
+            "headline": p.get("text"), "ios-stat": f"{p.get('value', '')} {p.get('label', '')}".strip(),
+            "ios-list": p.get("title") or " · ".join(str(x) for x in (p.get("items") or [])[:3]),
+            "ios-timer": p.get("text"), "ios-toggle": p.get("label"), "ios-suggested-edit": p.get("text"),
+            "before-after": p.get("after"), "ios-notification": p.get("title") or p.get("body"),
+            "ios-message": next((bb.get("text") for bb in (p.get("bubbles") or []) if bb.get("text")), None),
+            "ios-card": p.get("title"), "ios-progress": p.get("label"), "logo-end-card": "End card",
+        }
+        value = candidates.get(comp)
+        if value:
+            return _first_words(str(value), 3)
+    return _first_words(text, 3)
+
+
+_LEADING_FILLER = {"and", "but", "so", "then", "or", "also", "و", "ف", "ثم"}
+
+
+def _first_words(text: str, n: int) -> str:
+    words = [w for w in re.split(r"\s+", text.strip()) if w]
+    while words and normalize(words[0]) in _LEADING_FILLER:
+        words.pop(0)
+    name = " ".join(words[:n]).rstrip(",.;:!?")
+    return name[:1].upper() + name[1:] if name else "Beat"
+
+
+def graphic_copy(g: dict | None) -> str:
+    """The on-screen words a graphic shows — what the client has to approve."""
+    if not g:
+        return ""
+    p = g.get("props", {})
+    comp = g.get("component")
+    if comp == "ios-list":
+        return (f"{p['title']}: " if p.get("title") else "") + " · ".join(str(x) for x in (p.get("items") or []))
+    if comp == "ios-stat":
+        return f"{p.get('value', '')} {p.get('label', '')}".strip()
+    if comp == "ios-progress":
+        return f"{p.get('label', '')} {p.get('from', '')}{p.get('unit', '%')} → {p.get('to', '')}{p.get('unit', '%')}"
+    if comp == "before-after":
+        return f"{p.get('before', '')} → {p.get('after', '')}"
+    if comp == "ios-message":
+        return " / ".join(str(bb.get("text", "")) for bb in (p.get("bubbles") or []))
+    if comp == "ios-notification":
+        return " — ".join(str(p.get(k)) for k in ("title", "body") if p.get(k))
+    if comp == "ios-card":
+        rows = "; ".join(f"{r.get('label')}: {r.get('value')}" for r in (p.get("rows") or []) if isinstance(r, dict))
+        return f"{p.get('title', '')}" + (f" ({rows})" if rows else "")
+    if comp == "ios-toggle":
+        return f"{p.get('label', '')} — {p.get('state', '')}"
+    return " ".join(str(p.get(k, "")) for k in ("text", "cta") if p.get(k))
+
+
+def thumbnails(job: Job, beats: list[dict]) -> int:
+    """One frame per beat from the cut preview, as a stand-in until the renderer makes real stills."""
+    src = job.path / "previews" / "cut-preview.mp4"
+    if not src.is_file():
+        return 0
+    out_dir = job.path / "previews" / "beats"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    from ..media import run_ffmpeg
+
+    made = 0
+    for b in beats:
+        dst = out_dir / f"beat-{b['id']:02d}.jpg"
+        t = b["start"] + min(0.5, b["duration"] / 2)
+        run_ffmpeg(["-ss", f"{t:.3f}", "-i", str(src), "-frames:v", "1", "-vf", "scale=540:-2", "-q:v", "4", str(dst)])
+        made += 1
+    return made
 
 
 # -- report ------------------------------------------------------------------
