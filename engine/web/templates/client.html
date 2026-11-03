@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% block content %}
+<header class="hero"><div class="eyebrow">Studiio · client profile</div><h1>{{ c.name }}</h1>
+<p class="lede">{{ p.brand.tone or '' }}</p>
+<div class="tags"><span class="tag">{{ p.style.name }} style</span><span class="tag">{{ p.format.aspect }} · max {{ p.format.max_length_s }} s</span><span class="tag">captions {{ p.captions.font }} {{ p.captions.size_px }} px</span><span class="tag">{{ (p.client.languages or [])|join(' + ') }}</span>{% if p.review.studiio_review %}<span class="tag green">Studiio reviews the first {{ p.review.review_until_jobs }} jobs</span>{% endif %}</div></header>
+
+<section class="review">
+<div class="panel"><h3>Brand</h3>
+{% for k, v in (p.brand.colours or {}).items() %}<div><span class="swatch" style="background:{{ v }}"></span>{{ k }} <span class="dim mono">{{ v }}</span></div>{% endfor %}
+<p class="dim" style="margin-top:10px">Font: {{ p.brand.fonts.primary.file }} ({{ p.brand.fonts.primary.licence }})<br>Logo: {{ p.brand.logo }} · dark: {{ p.brand.logo_dark }}</p>
+<p class="dim">Music: {{ (p.music.moods or [])|join(', ') }} · {{ p.music.bpm }} bpm · ducking {{ p.music.ducking_db }} dB · {{ (p.music.tracks or [])|length }} licensed track(s)</p></div>
+<div class="panel"><h3>Rules</h3>
+<strong class="dim">Do</strong><ul class="rules">{% for r in (p.rules.do or []) %}<li>{{ r }}</li>{% endfor %}</ul>
+<strong class="dim">Don't</strong><ul class="rules">{% for r in (p.rules.dont or []) %}<li>{{ r }}</li>{% endfor %}</ul>
+{% if p.style.tweaks %}<strong class="dim">Style tweaks</strong><ul class="rules">{% for r in p.style.tweaks %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}</div>
+</section>
+
+<div class="label">Feedback log · every comment that became a rule</div>
+{% if p.feedback_log %}<table class="compact wide"><tr><th>date</th><th>comment</th><th>rule</th><th>scope</th><th>job</th></tr>
+{% for f in p.feedback_log|reverse %}<tr><td class="mono">{{ f.date }}</td><td>“{{ f.comment }}”</td><td>{{ f.rule }}</td><td class="dim">{{ f.scope }}</td><td><a class="plain" href="/jobs/{{ f.job }}">{{ f.job }}</a></td></tr>{% endfor %}</table>
+{% else %}<p class="dim">No feedback yet. The first revision writes the first rule here.</p>{% endif %}
+
+<div class="label">Jobs ({{ jobs|length }})</div>
+{% if jobs %}<table class="compact wide"><tr><th>reel</th><th>edit status</th><th>review</th><th>created</th></tr>
+{% for r in jobs %}<tr><td><a class="plain" href="/jobs/{{ r.name }}">{{ r.title }}</a> <span class="dim mono">{{ r.name }}</span></td><td><span class="badge {{ r.status.kind }}">{{ r.status.label }}</span></td>
+<td>{% if r.review %}{{ 'Approved' if r.review.status == 'approved' else 'Changes requested' }} v{{ r.review.version }}{% else %}<span class="dim">—</span>{% endif %}</td><td class="dim">{{ r.created|ago }}</td></tr>{% endfor %}</table>
+{% else %}<p class="dim">No jobs for this client yet.</p>{% endif %}
+
+<details style="margin-top:30px"><summary>The profile file (clients/{{ c.slug }}/profile.yaml)</summary><pre class="yaml">{{ c.yaml }}</pre></details>
+{% endblock %}

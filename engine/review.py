@@ -108,7 +108,11 @@ class _Handler(SimpleHTTPRequestHandler):
 
 # -- page --------------------------------------------------------------------
 
-def render(job: Job) -> str:
+def sections(job: Job, base: str = "") -> dict:
+    """The Beat Board's building blocks, so the platform's job page and `reel view` share them.
+
+    `base` is the URL prefix the job's files are served under ("" for `reel view`).
+    """
     client = job.state.get("client")
     try:
         profile = load_profile(client)
@@ -123,28 +127,33 @@ def render(job: Job) -> str:
     beats = job.read_json("beats.json") if job.has("beats.json") else None
     cuts = job.read_json("cuts.json") if job.has("cuts.json") else None
     video = _sequence_video(job)
-
-    body = [
+    blocks = [
         _hero(job, client_name, beats, cuts, profile),
-        _sequence(job, beats, cuts, video),
+        _sequence(job, beats, cuts, video, base),
         _changes(beats),
         _quality(job),
         _beats_table(beats),
-        _shots(job, beats),
+        _shots(job, beats, base),
         _copy(beats, client_name),
-        _engine(job),
+        _engine(job, base),
     ]
-    refresh = '<meta http-equiv="refresh" content="10">' if running else ""
-    font_q = font.replace(" ", "+")
+    return {"title": beats.get("title") if beats else job.name, "accent": accent, "font": font,
+            "client_name": client_name, "running": running, "blocks": blocks, "video": video, "beats": beats}
+
+
+def render(job: Job) -> str:
+    s = sections(job)
+    refresh = '<meta http-equiv="refresh" content="10">' if s["running"] else ""
+    font_q = s["font"].replace(" ", "+")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{esc(beats.get('title') if beats else job.name)} · Studiio</title>{refresh}
+<title>{esc(s['title'])} · Studiio</title>{refresh}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family={font_q}:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>{_CSS.replace('ACCENT', esc(accent)).replace('FONT', esc(font))}</style></head>
+<style>{_CSS.replace('ACCENT', esc(s['accent'])).replace('FONT', esc(s['font']))}</style></head>
 <body><main>
-{''.join(body)}
-<footer class="dim">./reel view · {esc(job.path)}{' · a stage is running, refreshing every 10 s' if running else ''}</footer>
+{''.join(s['blocks'])}
+<footer class="dim">./reel view · {esc(job.path)}{' · a stage is running, refreshing every 10 s' if s['running'] else ''}</footer>
 </main>
 <script>{_JS}</script>
 </body></html>"""
@@ -197,7 +206,7 @@ def _hero(job: Job, client_name: str, beats: dict | None, cuts: dict | None, pro
             f'<h1>{esc(title)}</h1><p class="lede">{lede}</p><div class="pills">{"".join(pills)}</div></header>')
 
 
-def _sequence(job: Job, beats: dict | None, cuts: dict | None, video: str | None) -> str:
+def _sequence(job: Job, beats: dict | None, cuts: dict | None, video: str | None, base: str = "") -> str:
     if not video:
         return '<section><h2>Full sequence</h2><p class="dim">No preview video yet — run <code>./reel cuts jobs/…</code>.</p></section>'
     duration = beats["duration"] if beats else (cuts["summary"]["seconds_out"] if cuts else 0)
@@ -210,7 +219,7 @@ def _sequence(job: Job, beats: dict | None, cuts: dict | None, video: str | None
             "This is the cut preview (the edit before graphics, captions and music). The render replaces it here once it exists.")
     return f"""<section id="sequence"><h2>Full sequence</h2>
 <div class="player" id="player" data-beats='{esc(data)}' data-duration="{duration}">
-<video id="main" src="/{esc(video)}#t=0.1" preload="auto" playsinline></video>
+<video id="main" src="{base}/{esc(video)}#t=0.1" preload="auto" playsinline></video>
 <div class="controls">
 <button id="play" class="btn">Play</button>
 <div class="scrub" id="scrub"><div class="track"><div class="fill" id="fill"></div>{marks}</div></div>
@@ -287,7 +296,7 @@ def _beats_table(beats: dict | None) -> str:
             f'<tbody>{"".join(rows)}</tbody></table></section>')
 
 
-def _shots(job: Job, beats: dict | None) -> str:
+def _shots(job: Job, beats: dict | None, base: str = "") -> str:
     if not beats:
         return ""
     from .stages.beats import graphic_line
@@ -297,7 +306,7 @@ def _shots(job: Job, beats: dict | None) -> str:
         still = f"stills/beat-{b['id']:02d}.jpg"
         thumb = f"previews/beats/beat-{b['id']:02d}.jpg"
         img = still if (job.path / still).is_file() else (thumb if (job.path / thumb).is_file() else None)
-        pic = f'<img src="/{esc(img)}" alt="" loading="lazy">' if img else '<div class="noimg">no frame</div>'
+        pic = f'<img src="{base}/{esc(img)}" alt="" loading="lazy">' if img else '<div class="noimg">no frame</div>'
         g = b.get("graphic")
         sub = f"{b['duration']:.2f} s · {esc(b['layout'])}" + (f" · {esc(graphic_line(g))}" if g else "")
         cards.append(
@@ -332,8 +341,8 @@ def _copy(beats: dict | None, client_name: str) -> str:
 
 # -- engine details ----------------------------------------------------------
 
-def _engine(job: Job) -> str:
-    inner = _stages(job) + _intake(job) + _transcript(job) + _takes(job) + _cuts(job) + _face(job)
+def _engine(job: Job, base: str = "") -> str:
+    inner = _stages(job) + _intake(job) + _transcript(job) + _takes(job) + _cuts(job) + _face(job, base)
     return (f'<details class="engine"><summary>Engine details — stages, intake, transcript, takes, cut list, face tracking</summary>'
             f'{inner}</details>')
 
@@ -439,7 +448,7 @@ def _cuts(job: Job) -> str:
             f"<details><summary>Final script</summary><p dir=auto class=script>{esc(d['script'])}</p></details></section>")
 
 
-def _face(job: Job) -> str:
+def _face(job: Job, base: str = "") -> str:
     if not job.has("face.json"):
         return _empty("Face tracking", "./reel face jobs/… --show")
     d = job.read_json("face.json")
@@ -459,7 +468,7 @@ def _face(job: Job) -> str:
         notes += f"<li class=warn-text>Face found in under half the frames of segments {esc(', '.join(str(i + 1) for i in s['segments_low_coverage']))}.</li>"
     video = ""
     if (job.path / "previews" / "face-preview.mp4").is_file():
-        video = '<video controls preload="metadata" class="small" src="/previews/face-preview.mp4#t=0.5"></video>'
+        video = f'<video controls preload="metadata" class="small" src="{base}/previews/face-preview.mp4#t=0.5"></video>'
     return (f"<section><h3>6 · Face tracking <span class=dim>{s['segments']} segments · {s['frames']} frames · "
             f"face found in <strong>{s['detected_fraction']:.0%}</strong> of frames</span></h3>"
             f"<p class=dim>Preview colours: green = raw detection, orange = smoothed track, red = no-go zone for graphics and captions.</p>"

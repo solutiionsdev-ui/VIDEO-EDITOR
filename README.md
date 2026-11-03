@@ -101,6 +101,9 @@ stage at a time:
 ./reel status jobs/test                   # which stages ran and how long they took
 ./reel show jobs/test cuts                # print a result again without re-running
 ./reel view jobs/test                     # review page in the browser (http://localhost:8765)
+./reel platform                           # the platform: jobs, queue, review, clients (http://localhost:8765)
+./reel worker                             # the editor: takes queued jobs and runs the engine on them
+./reel queue jobs/test --client haqq      # put an existing job folder on the queue
 ./reel doctor                             # check ffmpeg, models and libraries
 ```
 
@@ -111,6 +114,33 @@ tracking) are folded underneath. Leave it running and reload after re-running a 
 renderer exists the player shows the cut preview and the shot cards show frames from it.
 
 The client is remembered in the job's `job.json`, so `--client` is only needed the first time.
+
+## The platform (Phase 2)
+
+`./reel platform` serves the web layer over the job folders at http://localhost:8765, and
+`./reel worker` turns this Mac into an editor that takes jobs from the queue. The plan behind
+it is `PLATFORM.md`; the shape copies the editing loop of Brody's FounderOS, cut down to editing.
+
+| Page | What it shows | Where it reads from |
+|---|---|---|
+| Jobs | every reel, its status, the Studiio verdict, the delivered file | the job folders |
+| Queue | editors and their heartbeat, what is running (stage by stage), up next, waiting for Claude, finished today | `jobs/queue.json`, `jobs/workers/*.json`, `jobs/<job>/worker.json` |
+| Job page | the Beat Board, Approve, "What should change?", the versions | the job folder, `approvals.json` |
+| New job | client, title, footage by link or upload, notes, due date → on the queue | writes `jobs/<client>-<slug>/` |
+| Clients | brand, rules, the feedback log, the jobs per client | `clients/<slug>/profile.yaml` |
+
+How a job moves: **New job** puts an `edit` item on the queue → the worker fetches the footage
+(a Google Drive link works when the file is shared with anyone with the link), runs intake → stills,
+then render and the quality check → the Jobs page says **To review**. When the beat plan needs
+Claude, the item goes back on the queue as **waiting**: Claude Code reads `beats-request.md`, writes
+`beats-plan.json`, and the worker picks the job up again by itself. A comment in **What should
+change?** becomes a `revise` item (pinned to the player's time if you leave the box ticked); only the
+changed beats re-render and the old version is marked superseded. **Approve** copies the file into
+`jobs/<job>/delivery/`.
+
+The status of a job is never stored: it is derived from the files in its folder (`renders/vN.mp4`,
+`vN-check.json`, `beats-request.md`, `approvals.json`, the queue), so a page can only show a state the
+folder is actually in. Everything listens on 127.0.0.1 only.
 
 ## Folders
 

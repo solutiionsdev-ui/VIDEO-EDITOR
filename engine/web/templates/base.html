@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ title }} · Studiio</title>
+{% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700{% if font and font != 'Inter' %}&family={{ font|replace(' ', '+') }}:wght@400;500;600;700{% endif %}&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/platform.css">
+{% if accent %}<style>:root{--accent:{{ accent }}}</style>{% endif %}
+</head><body><div class="shell">
+<aside class="side">
+<a class="logo" href="/"><i></i>Studiio</a>
+<div class="group">Content</div>
+<a class="item {{ 'on' if nav == 'jobs' else '' }}" href="/">{{ icon('film') }}Media Tracker</a>
+<a class="item {{ 'on' if nav == 'queue' else '' }}" href="/queue">{{ icon('queue') }}Queue{% set n = queue_open() %}{% if n %}<span class="n">{{ n }}</span>{% endif %}</a>
+<a class="item {{ 'on' if nav == 'new' else '' }}" href="/jobs/new">{{ icon('plus') }}New job</a>
+<div class="group">Clients</div>
+<a class="item {{ 'on' if nav == 'clients' else '' }}" href="/clients">{{ icon('users') }}Profiles</a>
+<div class="group">Workforce</div>
+<a class="item" href="/queue#editors">{{ icon('cpu') }}Editors</a>
+</aside>
+<div class="content">
+<div class="crumbs">studiio / <b>{{ crumb or title|lower }}</b></div>
+<main>{% block content %}{% endblock %}
+<footer class="dim">./reel platform · {{ root }}{% if refresh %} · refreshes every {{ refresh }} s{% endif %}</footer></main>
+</div></div>
+{% block scripts %}{% endblock %}
+</body></html>

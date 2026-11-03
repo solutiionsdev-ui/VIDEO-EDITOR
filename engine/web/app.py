@@ -1,0 +1,297 @@
+"""`reel platform`: Jobs, Queue, the Job page (Beat Board + review), New job, Clients.
+
+Everything is read from the job folders on every request; the only things the pages
+write are the queue, the approvals and a new job folder. Listens on 127.0.0.1 only.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import threading
+import webbrowser
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
+
+from .. import ops
+from ..job import RAW_EXTENSIONS, Job, JobError, console, fmt_clock, fmt_time
+from ..profile import ROOT
+from ..review import _CSS, _JS, sections
+from ..stages.revise import _BEAT_RE, _TIME_RE
+
+HERE = Path(__file__).parent
+
+ICONS = {
+    "film": '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7.5 4v16M16.5 4v16M3 9h4.5M3 15h4.5M16.5 9H21M16.5 15H21"/></svg>',
+    "queue": '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h9"/></svg>',
+    "plus": '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+    "users": '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.5a5 5 0 0 1 6 5.5"/></svg>',
+    "cpu": '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>',
+    "grid": '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/></svg>',
+    "check": '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    "clock": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+    "pause": '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
+}
+
+templates = Jinja2Templates(directory=str(HERE / "templates"))
+templates.env.filters["ago"] = ops.ago
+templates.env.filters["clock"] = fmt_clock
+templates.env.filters["ftime"] = fmt_time
+templates.env.globals["root"] = str(ROOT)
+templates.env.globals["icon"] = lambda name: Markup(ICONS.get(name, ""))
+templates.env.globals["queue_open"] = ops.open_count
+
+app = FastAPI(title="Studiio Reel Editor", docs_url=None, redoc_url=None)
+
+def css_text() -> str:
+    """The Beat Board's stylesheet plus the platform theme, read on every request so a style edit shows on reload."""
+    return _CSS.replace("ACCENT", "#66023C").replace("FONT", "Inter") + (HERE / "platform.css").read_text(encoding="utf-8")
+
+STATUS_FILTERS = [("", "Every status"), ("to_review", "To review"), ("needs", "Needs you"), ("editing", "In edit"),
+                  ("changes", "Changes requested"), ("approved", "Approved"), ("delivered", "Delivered")]
+FILTER_STATES = {"to_review": {"to_review"}, "needs": {"waiting", "blocked", "failed", "check_failed"},
+                 "editing": {"queued", "editing", "in_progress", "planned", "new"}, "changes": {"changes"},
+                 "approved": {"approved", "delivered"}, "delivered": {"delivered"}}
+
+
+def serve(port: int = 8765, open_browser: bool = True) -> None:
+    import uvicorn
+
+    url = f"http://localhost:{port}/"
+    console.print(f"Studiio Reel Editor platform: {url}  (Ctrl-C to stop)")
+    if open_browser:
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+
+
+def page(request: Request, template: str, **ctx):
+    ctx.setdefault("title", "Studiio")
+    ctx.setdefault("accent", None)
+    ctx.setdefault("font", None)
+    ctx.setdefault("refresh", None)
+    ctx.setdefault("nav", None)
+    ctx.setdefault("crumb", None)
+    return templates.TemplateResponse(request=request, name=template, context=ctx)
+
+
+def _job(name: str) -> Job:
+    if not re.fullmatch(r"[\w.\-]+", name) or name.startswith((".", "_")):
+        raise HTTPException(404)
+    try:
+        return Job(ops.JOBS_DIR / name)
+    except JobError:
+        raise HTTPException(404, f"no job named {name}")
+
+
+def _rows() -> list[dict]:
+    rows = [ops.job_summary(j) for j in ops.list_jobs()]
+    rows.sort(key=lambda r: r["created"] or "", reverse=True)
+    for r in rows:
+        r["filters"] = " ".join(k for k, states in FILTER_STATES.items() if r["status"]["state"] in states)
+    return rows
+
+
+# -- pages -----------------------------------------------------------------------------
+
+@app.get("/static/platform.css")
+def css() -> Response:
+    return Response(css_text(), media_type="text/css")
+
+
+@app.get("/", response_class=HTMLResponse)
+def jobs_page(request: Request):
+    rows = _rows()
+    busy = any(r["status"]["state"] in ("editing", "queued") for r in rows)
+    return page(request, "jobs.html", title="Media Tracker", crumb="content / media tracker", nav="jobs", rows=rows,
+                stats=ops.stats(rows), filters=STATUS_FILTERS, refresh=10 if busy else None)
+
+
+@app.get("/queue", response_class=HTMLResponse)
+def queue_page(request: Request):
+    items = ops.read_queue()
+    today = datetime.now(timezone.utc).date().isoformat()
+    titles: dict[str, str] = {}
+
+    def enrich(it: dict) -> dict:
+        it = dict(it)
+        path = ops.JOBS_DIR / it["job"]
+        if it["job"] not in titles:
+            try:
+                titles[it["job"]] = ops.meta(Job(path)).get("title") or it["job"]
+            except JobError:
+                titles[it["job"]] = it["job"]
+        it["title"] = titles[it["job"]]
+        it["ws"] = ops.read_json(path / ops.WORKER_STATE, {})
+        try:
+            job = Job(path)
+            it["client"] = ops.client_name(job.state.get("client"))
+            it["stages"] = ops.stage_rows(job, it["ws"].get("stage"))
+            it["log"] = ops.log_tail(job, 4)
+        except JobError:
+            it["client"], it["stages"], it["log"] = "", [], ""
+        done = [s for s in it["stages"] if s["kind"] == "done"]
+        it["done_n"], it["total_n"] = len(done), len(it["stages"])
+        it["progress"] = (len(done) / len(it["stages"])) if it["stages"] else 0
+        it["last_done"] = done[-1] if done else None
+        it["request"] = ops.REQUEST_FILES.get(it.get("waiting_on") or "")
+        it["plan"] = ops.WAIT_FILES.get(it.get("waiting_on") or "")
+        return it
+
+    running = [enrich(i) for i in items if i.get("claimed_by") and not i.get("finished_at")]
+    waiting = [enrich(i) for i in items if not i.get("finished_at") and not i.get("claimed_by") and i.get("result") == "waiting"]
+    up_next = [enrich(i) for i in items if not i.get("finished_at") and not i.get("claimed_by") and i.get("result") != "waiting"]
+    finished = sorted((enrich(i) for i in items if (i.get("finished_at") or "")[:10] == today),
+                      key=lambda i: i["finished_at"], reverse=True)
+    rows = _rows()
+    return page(request, "queue.html", title="Queue", crumb="content / queue", nav="queue", editors=ops.workers(),
+                running=running, waiting=waiting, up_next=up_next, finished=finished, stats=ops.stats(rows), refresh=5)
+
+
+@app.get("/jobs/new", response_class=HTMLResponse)
+def new_job_form(request: Request, client: str = ""):
+    clients = ops.list_clients()
+    return page(request, "new.html", title="New job", crumb="content / new job", nav="new", clients=clients, error=None,
+                formats=_formats(clients),
+                values={"client": client or (clients[0]["slug"] if clients else ""), "title": "", "footage_url": "",
+                        "notes": "", "due": ""})
+
+
+def _formats(clients: list[dict]) -> dict:
+    out = {}
+    for c in clients:
+        p = c["profile"]
+        f = p.get("format") or {}
+        out[c["slug"]] = (f"{f.get('aspect', '9:16')} · max {f.get('max_length_s', 60)} s · {p.get('style', {}).get('name', 'ios')} style"
+                          f" · captions {p.get('captions', {}).get('font', '')} {p.get('captions', {}).get('size_px', '')} px")
+    return out
+
+
+@app.post("/jobs/new")
+async def create_job(request: Request, client: str = Form(""), title: str = Form(""), footage_url: str = Form(""),
+                     notes: str = Form(""), due: str = Form(""), files: list[UploadFile] = File(default=[])):
+    clients = ops.list_clients()
+    values = {"client": client, "title": title, "footage_url": footage_url.strip(), "notes": notes, "due": due}
+    uploads = [f for f in files if f.filename]
+
+    def fail(msg: str):
+        return page(request, "new.html", title="New job", crumb="content / new job", nav="new", clients=clients,
+                    error=msg, values=values, formats=_formats(clients))
+
+    if not any(c["slug"] == client for c in clients):
+        return fail("Pick a client.")
+    if not title.strip():
+        return fail("Give the reel a title.")
+    if not uploads and not values["footage_url"]:
+        return fail("Add the footage: a link or a file.")
+    if values["footage_url"] and not re.match(r"https?://", values["footage_url"]):
+        return fail("The footage link has to start with http:// or https://")
+    for f in uploads:
+        if Path(f.filename).suffix.lower() not in RAW_EXTENSIONS:
+            return fail(f"{f.filename} is not a video file the engine accepts ({', '.join(sorted(RAW_EXTENSIONS))}).")
+
+    base = f"{client}-{ops.slug(title)}"
+    name, n = base, 2
+    while (ops.JOBS_DIR / name).exists():
+        name, n = f"{base}-{n}", n + 1
+    path = ops.JOBS_DIR / name
+    (path / "raw").mkdir(parents=True)
+    for f in uploads:
+        safe = re.sub(r"[^\w.\-]+", "_", Path(f.filename).name)
+        with (path / "raw" / safe).open("wb") as out:
+            shutil.copyfileobj(f.file, out, 1 << 20)
+    if notes.strip():
+        (path / "note.md").write_text(notes.strip() + "\n", encoding="utf-8")
+    job = Job(path)
+    job.state["client"] = client
+    footage = ({"type": "link", "url": values["footage_url"], "status": "pending"} if values["footage_url"]
+               else {"type": "upload", "status": "fetched", "files": [f.filename for f in uploads]})
+    job.state["meta"] = {"title": title.strip(), "notes": notes.strip(), "footage": footage, "due": due.strip(),
+                         "created_by": "platform"}
+    job.save_state()
+    ops.enqueue(job.name, "edit", note=title.strip())
+    return RedirectResponse(f"/jobs/{job.name}", status_code=303)
+
+
+@app.get("/jobs/{name}", response_class=HTMLResponse)
+def job_page(request: Request, name: str):
+    job = _job(name)
+    s = sections(job, base=f"/jobs/{name}/files")
+    st = ops.job_status(job)
+    vers = ops.versions(job)
+    items = ops.items_for(job.name)[:12]
+    busy = st["state"] in ("editing", "queued", "waiting") or s["running"]
+    request_file = ops.REQUEST_FILES.get((st.get("waiting") or {}).get("waiting_on") or "")
+    editors = [w for w in ops.workers() if w.get("online")]
+    return page(request, "job.html", title=s["title"], crumb=f"content / {job.name}", nav="jobs", accent=s["accent"],
+                font=s["font"], name=job.name, job=job, meta=ops.meta(job), blocks=s["blocks"], js=_JS, st=st,
+                versions=vers, approvals=ops.read_approvals(job), items=items, log=ops.log_tail(job, 12),
+                stages=ops.stage_rows(job, (st.get("worker") or {}).get("stage")), request_file=request_file,
+                client_name=s["client_name"], refresh=5 if busy else None,
+                delivered=ops.delivered_file(job, st["version"]), editors=editors)
+
+
+@app.post("/jobs/{name}/review")
+def review(name: str, action: str = Form(...), comments: str = Form(""), at: str = Form(""), pin: str = Form(""),
+           note: str = Form("")):
+    job = _job(name)
+    st = ops.job_status(job)
+    if not st["version"]:
+        raise HTTPException(400, "nothing rendered yet")
+    if action == "approve":
+        ops.set_review(job, "approved", st["version"], note=note)
+        ops.deliver(job, st["version"])
+    elif action == "changes":
+        lines = [ln.strip() for ln in comments.splitlines() if ln.strip()]
+        if not lines:
+            raise HTTPException(400, "write what should change")
+        if pin and at:
+            try:
+                t = float(at)
+            except ValueError:
+                t = None
+            if t is not None and not (_BEAT_RE.match(lines[0]) or _TIME_RE.match(lines[0])):
+                m, sec = divmod(int(round(t)), 60)
+                lines[0] = f"{m}:{sec:02d} {lines[0]}"
+        ops.set_review(job, "changes", st["version"], note="\n".join(lines))
+        ops.enqueue(job.name, "revise", comments=lines)
+    else:
+        raise HTTPException(400, "unknown action")
+    return RedirectResponse(f"/jobs/{name}", status_code=303)
+
+
+@app.post("/jobs/{name}/queue")
+def queue_job(name: str):
+    job = _job(name)
+    ops.enqueue(job.name, "edit", note=ops.meta(job).get("title") or job.name)
+    return RedirectResponse(f"/jobs/{name}", status_code=303)
+
+
+@app.get("/jobs/{name}/files/{path:path}")
+def job_file(name: str, path: str):
+    job = _job(name)
+    target = (job.path / path).resolve()
+    if not str(target).startswith(str(job.path.resolve()) + "/") or not target.is_file():
+        raise HTTPException(404)
+    return FileResponse(target)
+
+
+@app.get("/clients", response_class=HTMLResponse)
+def clients_page(request: Request):
+    return page(request, "clients.html", title="Clients", crumb="clients", nav="clients", clients=ops.list_clients())
+
+
+@app.get("/clients/{slug}", response_class=HTMLResponse)
+def client_page(request: Request, slug: str):
+    c = next((c for c in ops.list_clients() if c["slug"] == slug), None)
+    if not c:
+        raise HTTPException(404)
+    jobs = [ops.job_summary(j) for j in ops.list_jobs() if j.state.get("client") == slug]
+    jobs.sort(key=lambda r: r["created"] or "", reverse=True)
+    accent = str(((c["profile"].get("brand") or {}).get("colours") or {}).get("primary") or "#66023C")
+    return page(request, "client.html", title=c["name"], crumb=f"clients / {slug}", nav="clients", c=c,
+                p=c["profile"], jobs=jobs, accent=accent)

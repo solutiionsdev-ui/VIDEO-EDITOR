@@ -1,0 +1,78 @@
+{% extends "base.html" %}{% block content %}
+{{ blocks[0]|safe }}
+<div class="banner {{ st.kind }}"><strong>{{ st.label }}</strong>
+{% if st.state == 'editing' %} — on {{ st.worker.worker }}{% if st.worker.stage_started %}, this stage started {{ st.worker.stage_started|ago }}{% endif %}.
+<div class="stages">{% for s in stages %}<span class="{{ s.kind }}">{{ s.name }}{% if s.seconds is not none %} {{ s.seconds }}s{% endif %}</span>{% endfor %}</div>
+{% elif st.state == 'queued' %} — an editor will pick it up.{% if not editors %} None is online: start one with <code>./reel worker</code>.{% endif %}
+{% elif st.state == 'waiting' %} — Claude Code reads <code>jobs/{{ name }}/{{ request_file }}</code> and writes the plan next to it; the editor then continues by itself.
+{% elif st.state in ('failed', 'blocked', 'check_failed') %} — see the log below and the engine details at the bottom.
+{% elif st.state == 'to_review' %} — watch it, then approve it or write what should change.
+{% elif st.state == 'delivered' %} — <a class="open" href="/jobs/{{ name }}/files/{{ delivered }}">final in delivery</a>
+{% endif %}
+{% if meta.footage and meta.footage.type == 'link' %}<div class="dim" style="margin-top:6px">Footage link: <a href="{{ meta.footage.url }}">{{ meta.footage.url }}</a> · {{ meta.footage.status }}{% if meta.footage.error %} — {{ meta.footage.error }}{% endif %}</div>{% endif %}
+{% if log and st.state in ('editing', 'failed', 'blocked', 'check_failed') %}<pre class="log">{{ log }}</pre>{% endif %}
+</div>
+
+<section class="review">
+<div class="panel"><h3>Studiio review</h3>
+{% if st.version %}
+<div class="tags"><span class="tag">v{{ st.version }}</span>{% if st.check %}<span class="tag {{ 'green' if st.check == 'pass' else 'red' if st.check == 'fail' else 'amber' }}">quality check {{ st.check }}</span>{% endif %}
+{% if st.review and st.review.version == st.version %}<span class="tag {{ 'green' if st.review.status == 'approved' else 'amber' }}">{{ 'Approved' if st.review.status == 'approved' else 'Changes requested' }} · {{ st.review.at|ago }}</span>{% elif st.review %}<span class="tag">v{{ st.review.version }} {{ 'approved' if st.review.status == 'approved' else 'sent back' }} {{ st.review.at|ago }}</span><span class="tag amber">v{{ st.version }} not watched</span>{% else %}<span class="tag amber">Not watched</span>{% endif %}</div>
+<div class="actions">
+{% if not (st.review and st.review.version == st.version and st.review.status == 'approved') %}<form method="post" action="/jobs/{{ name }}/review"><input type="hidden" name="action" value="approve"><button class="btn">Approve v{{ st.version }}</button></form>{% endif %}
+{% if delivered %}<a class="btn ghost" href="/jobs/{{ name }}/files/{{ delivered }}">Final in delivery ↗</a>{% endif %}
+<a class="btn ghost" href="/jobs/{{ name }}/files/renders/v{{ st.version }}.mp4">Open v{{ st.version }} ↗</a>
+</div>
+<p class="dim" style="margin:12px 0 0">Approve copies the file into <code>delivery/</code>. A new version resets the verdict.</p>
+{% else %}<p class="dim">Nothing rendered yet.</p>
+{% if st.state in ('new', 'in_progress', 'planned', 'failed', 'blocked') %}<form method="post" action="/jobs/{{ name }}/queue"><div class="actions"><button class="btn">{{ 'Queue again' if st.state in ('failed', 'blocked') else 'Queue for editing' }}</button></div></form>{% endif %}
+{% endif %}
+</div>
+<div class="panel">
+<div class="rtabs"><button type="button" class="on" data-tab="rev">Revisions</button><button type="button" data-tab="notes">Notes</button></div>
+<div id="tab-rev">
+<p class="dim" style="margin:0 0 8px">{% if st.review and st.review.status == 'changes' and st.review.version == st.version %}Sent back: “{{ st.review.note }}”{% else %}Nothing to change yet. Pause the video where something is off and write what to change.{% endif %}</p>
+<form method="post" action="/jobs/{{ name }}/review" id="revise"><input type="hidden" name="action" value="changes"><input type="hidden" name="at" id="at"><input type="hidden" name="pin" id="pin" value="1">
+<textarea name="comments" placeholder="What should change?" {% if not st.version %}disabled{% endif %}></textarea>
+<div class="chips"><span class="chip static">General</span><button type="button" class="chip on" id="atchip" title="pin the first line to this moment">Add at 0:00</button></div>
+<div class="actions"><span class="chip static">{% if editors %}{{ editors[0].name }} · {{ 'busy' if editors[0].busy_with else 'idle' }}{% else %}no editor online{% endif %}</span><button class="btn" {% if not st.version %}disabled{% endif %}>Add to queue</button></div>
+</form>
+<p class="dim" style="margin:12px 0 0">One change per line. <code>beat 4:</code> or <code>0:32</code> at the start of a line pins it yourself; only the changed beats re-render.</p>
+</div>
+<div id="tab-notes" style="display:none">
+<label class="f">Notes for the edit</label><p style="margin:0">{{ meta.notes or '—' }}</p>
+{% if meta.due %}<label class="f">Due</label><p style="margin:0" class="mono">{{ meta.due }}</p>{% endif %}
+<label class="f">Links</label><p style="margin:0"><a class="open" href="/jobs/{{ name }}/files/log.txt">Engine log</a> · <a class="open" href="/jobs/{{ name }}/files/worker.log">Editor log</a>{% if delivered %} · <a class="open" href="/jobs/{{ name }}/files/{{ delivered }}">Final in delivery</a>{% endif %}</p>
+</div>
+</div>
+</section>
+
+<section id="versions"><div class="label">Versions</div>
+{% if versions %}<table class="compact wide"><tr><th>version</th><th>rendered</th><th>changes</th><th>quality check</th><th></th></tr>
+{% for v in versions|reverse %}<tr><td class="mono">v{{ v.version }} {% if v.superseded %}<span class="tag">superseded</span>{% else %}<span class="tag violet">current</span>{% endif %}</td>
+<td class="dim">{{ v.rendered|ago }}{% if v.seconds %} · {{ v.seconds }} s to render{% endif %} · {{ v.size_mb }} MB</td>
+<td>{% if v.changes %}{% for c in v.changes %}<div>Beat {{ c.beat }} — {{ c.change }} <span class="dim">← “{{ c.comment }}”</span></div>{% endfor %}{% else %}<span class="dim">first version</span>{% endif %}</td>
+<td>{% if v.check %}<span class="tag {{ 'green' if v.check == 'pass' else 'red' if v.check == 'fail' else 'amber' }}">{{ v.check }}</span>{% else %}<span class="dim">not checked</span>{% endif %}</td>
+<td><a class="open" href="/jobs/{{ name }}/files/{{ v.file }}">Open</a></td></tr>{% endfor %}</table>
+{% else %}<p class="dim">No render yet.</p>{% endif %}
+{% if items %}<details style="margin-top:12px"><summary>Queue history for this job</summary><table class="compact wide"><tr><th>item</th><th>kind</th><th>result</th><th>when</th><th>comments</th></tr>
+{% for i in items %}<tr><td class="mono">{{ i.id }}</td><td>{{ i.kind }}</td><td>{{ i.result or ('running on ' + i.claimed_by if i.claimed_by else 'queued') }}</td><td class="dim">{{ (i.finished_at or i.created)|ago }}</td><td class="dim">{{ i.comments|join(' · ') }}{% if i.error %} — {{ i.error }}{% endif %}</td></tr>{% endfor %}</table></details>{% endif %}
+</section>
+
+{% for b in blocks[1:] %}{{ b|safe }}{% endfor %}
+{% endblock %}
+{% block scripts %}<script>{{ js|safe }}
+(function(){
+  const f = document.getElementById('revise'), chip = document.getElementById('atchip'), pin = document.getElementById('pin'), at = document.getElementById('at');
+  const v = document.getElementById('main');
+  const fmt = s => { s = Math.max(0, s||0); const m = Math.floor(s/60); return m + ':' + String(Math.floor(s - m*60)).padStart(2, '0'); };
+  if (v && chip) v.addEventListener('timeupdate', () => { if (chip.classList.contains('on')) chip.textContent = 'Add at ' + fmt(v.currentTime); });
+  if (chip) chip.addEventListener('click', () => { chip.classList.toggle('on'); pin.value = chip.classList.contains('on') ? '1' : ''; chip.textContent = chip.classList.contains('on') ? 'Add at ' + fmt(v ? v.currentTime : 0) : 'Not pinned'; });
+  if (f) f.addEventListener('submit', () => { at.value = v ? v.currentTime.toFixed(1) : ''; });
+  document.querySelectorAll('.rtabs button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.rtabs button').forEach(x => x.classList.toggle('on', x === b));
+    document.getElementById('tab-rev').style.display = b.dataset.tab === 'rev' ? '' : 'none';
+    document.getElementById('tab-notes').style.display = b.dataset.tab === 'notes' ? '' : 'none';
+  }));
+})();
+</script>{% endblock %}

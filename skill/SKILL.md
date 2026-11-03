@@ -29,6 +29,13 @@ from assumptions about the client.
 Every stage reads the job folder and writes one JSON file, so a stage can be re-run alone after a
 profile change, without redoing the expensive ones (transcription, face tracking).
 
+## The platform and the worker
+
+`./reel platform` (http://localhost:8765) and `./reel worker` wrap the same commands. When the Queue
+page shows a job under **Waiting for Claude**, do the planning step below for that job (`beats-request.md`
+→ `beats-plan.json`, or `revision-request.md` → `revision-plan.json`); the worker notices the plan file and
+continues on its own. Never edit the queue, approvals or worker files by hand.
+
 ## What to check after each stage
 
 - **intake.json** — `status` is `pass`, `warnings` or `blocked`. Blockers stop the run: tell the person

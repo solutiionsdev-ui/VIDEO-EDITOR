@@ -1,0 +1,2 @@
+<div class="statbar"><div class="head">Queue <span class="track"><i style="width:{{ (stats.share * 100)|round(1) }}%"></i></span></div>
+<div class="stats"><span>In edit <b>{{ stats.in_edit }}</b>{% if stats.live %} (<b>{{ stats.live }}</b> live){% endif %}</span><span>To review <b>{{ stats.to_review }}</b></span><span>Revisions <b>{{ stats.revisions }}</b></span><span>Approved <b>{{ stats.approved }}</b></span><span>Needs you <b>{{ stats.needs_you }}</b></span><span>This month <b>{{ stats.month_approved }}</b> / {{ stats.month }} approved</span></div></div>

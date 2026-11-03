@@ -7,6 +7,9 @@
     reel revise <job> "beat 4: ..."       apply client comments, log the rules, re-render changed beats
     reel status <job>                     which stages ran, how long they took
     reel view <job>                       review page at http://localhost:8765
+    reel platform                         the web platform (jobs, queue, review, clients) at http://localhost:8765
+    reel worker                           the editor: takes queued jobs and runs the engine on them
+    reel queue <job> --client <slug>      put a job folder on the queue
     reel doctor                           check the tools are in place
 """
 
@@ -128,7 +131,45 @@ def build_parser() -> argparse.ArgumentParser:
     view.add_argument("--port", type=int, default=8765)
     view.add_argument("--no-open", action="store_true", help="don't open the browser automatically")
     view.set_defaults(func=cmd_view)
+
+    plat = sub.add_parser("platform", help="the web platform: jobs, queue, review, clients (http://localhost:8765)")
+    plat.add_argument("--port", type=int, default=8765)
+    plat.add_argument("--no-open", action="store_true", help="don't open the browser automatically")
+    plat.set_defaults(func=cmd_platform)
+
+    wk = sub.add_parser("worker", help="the editor: takes jobs from the queue and runs the engine on them")
+    wk.add_argument("--name", help="this editor's name on the Queue page (default: this Mac's name)")
+    wk.add_argument("--once", action="store_true", help="do one item and stop")
+    wk.add_argument("--interval", type=float, default=5.0, help="seconds between looks at the queue")
+    wk.set_defaults(func=cmd_worker)
+
+    qu = sub.add_parser("queue", help="put a job folder on the queue for the worker")
+    qu.add_argument("job")
+    qu.add_argument("--client")
+    qu.set_defaults(func=cmd_queue)
     return p
+
+
+def cmd_platform(args) -> int:
+    from .web.app import serve
+
+    serve(port=args.port, open_browser=not args.no_open)
+    return 0
+
+
+def cmd_worker(args) -> int:
+    from .worker import run_worker
+
+    return run_worker(name=args.name, once=args.once, interval=args.interval)
+
+
+def cmd_queue(args) -> int:
+    from . import ops
+
+    job, _profile = _open(args)
+    item = ops.enqueue(job.name, "edit", note=ops.meta(job).get("title") or job.name)
+    console.print(f"queued [bold]{job.name}[/] as {item['id']} — start an editor with `reel worker` if none is running")
+    return 0
 
 
 def cmd_view(args) -> int:

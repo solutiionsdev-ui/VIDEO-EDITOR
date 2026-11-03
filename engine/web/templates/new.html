@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block content %}
+{% include "_titlebar.html" %}
+<form class="panel" method="post" action="/jobs/new" enctype="multipart/form-data" style="max-width:780px">
+<h3 style="font-size:18px">Idea</h3>
+{% if error %}<div class="err-box">{{ error }}</div>{% endif %}
+<label class="f">Title</label><input type="text" name="title" value="{{ values.title }}" placeholder="The full lead journey, tracked live" required>
+<div class="row3"><div><label class="f">Client</label><select name="client" id="client">{% for c in clients %}<option value="{{ c.slug }}" {{ 'selected' if c.slug == values.client else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
+<div><label class="f">Due</label><input type="date" name="due" value="{{ values.due }}"></div>
+<div><label class="f">Type</label><input type="text" value="Main edit · talking head" disabled></div></div>
+<label class="f">Format</label><div class="chips" style="margin-top:0" id="fmt">{% for slug, text in formats.items() %}<span class="chip static" data-client="{{ slug }}" {% if slug != values.client %}style="display:none"{% endif %}>{{ text }}</span>{% endfor %}</div>
+<div class="label" style="margin-top:22px">Footage and video</div>
+<div class="row"><div><label class="f">Raw footage</label><input type="file" name="files" multiple accept="video/*,.mov,.mp4,.m4v,.mkv,.webm,.mts"></div>
+<div><label class="f">Footage link</label><input type="url" name="footage_url" value="{{ values.footage_url }}" placeholder="https://drive.google.com/file/d/…"></div></div>
+<p class="dim" style="margin:8px 0 0">A Google Drive link works when the file is shared with anyone with the link. One of the two is enough.</p>
+<label class="f">Notes for the edit</label><textarea name="notes" placeholder="Anything the editor should know: what to keep, what to cut, the one message of the video.">{{ values.notes }}</textarea>
+<div class="actions"><button class="btn">Add to the queue</button><a class="btn ghost" href="/">Cancel</a><span class="dim">Style, captions and rules come from the <a href="/clients">client profile</a>.</span></div>
+</form>
+{% endblock %}
+{% block scripts %}<script>
+(function(){ const s=document.getElementById('client'); if(!s) return; s.addEventListener('change',()=>{ document.querySelectorAll('#fmt .chip').forEach(c=>c.style.display=c.dataset.client===s.value?'':'none'); }); })();
+</script>{% endblock %}

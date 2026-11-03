@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block content %}
+{% include "_titlebar.html" %}
+<div class="label">Profiles</div>
+{% if clients %}<table class="compact wide"><tr><th>client</th><th>colours</th><th>languages</th><th>rules</th><th>feedback log</th><th>jobs</th></tr>
+{% for c in clients %}<tr><td><a class="plain" href="/clients/{{ c.slug }}"><strong>{{ c.name }}</strong></a> <span class="dim mono">{{ c.slug }}</span></td>
+<td>{% for k, v in (c.profile.brand.colours or {}).items() %}<span class="swatch" style="background:{{ v }}" title="{{ k }} {{ v }}"></span>{% endfor %}</td>
+<td>{{ (c.profile.client.languages or [])|join(', ') }}</td><td class="mono">{{ c.rules }}</td><td class="mono">{{ c.feedback }}</td><td class="mono">{{ c.jobs }}</td></tr>{% endfor %}</table>
+{% else %}<p class="dim">No client profiles in <code>clients/</code> yet.</p>{% endif %}
+{% endblock %}

@@ -77,6 +77,11 @@ feedback_log:
   rule: captions 12% bigger on beat 4
   scope: beat 4
   job: test
+- date: '2026-11-03'
+  comment: 0:45 move the graphic down
+  rule: graphic at the bottom
+  scope: beat 12
+  job: test
 review:
   studiio_review: true
   reviewed_jobs: 0

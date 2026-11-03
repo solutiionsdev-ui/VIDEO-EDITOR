@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% block content %}
+{% include "_titlebar.html" %}
+{% include "_stats.html" %}
+<div class="toolbar"><input type="text" id="q" placeholder="Search reels, clients, notes"><select id="f">{% for v, l in filters %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select>
+<label class="toggle"><input type="checkbox" id="hide"> Hide delivered</label><span class="dim" id="count"></span></div>
+{% if rows %}
+<div class="tablewrap"><table class="jobs" id="jobs"><thead><tr><th>thumbnail</th><th>reel</th><th>client</th><th>length</th><th>final video</th><th>Studiio review</th><th>edit status</th><th>due</th><th>created</th></tr></thead><tbody>
+{% for r in rows %}<tr data-filters="{{ r.filters }}" data-state="{{ r.status.state }}" data-text="{{ (r.title ~ ' ' ~ r.name ~ ' ' ~ r.client_name ~ ' ' ~ r.status.label)|lower }}">
+<td>{% if r.thumb %}<a href="/jobs/{{ r.name }}"><img class="thumb" src="/jobs/{{ r.name }}/files/{{ r.thumb }}" alt=""></a>{% else %}<div class="nothumb"></div>{% endif %}</td>
+<td><a class="plain" href="/jobs/{{ r.name }}"><strong>{{ r.title }}</strong></a><div class="dim mono">{{ r.name }}{% if r.version %} · v{{ r.version }}{% endif %}</div></td>
+<td>{{ r.client_name }}</td>
+<td class="mono">{% if r.length is not none %}{{ r.length|clock }}{% else %}—{% endif %}</td>
+<td>{% if r.final %}<a class="open" href="/jobs/{{ r.name }}/files/{{ r.final }}">Open</a>{% elif r.version %}<a class="open" href="/jobs/{{ r.name }}/files/renders/v{{ r.version }}.mp4">Open v{{ r.version }}</a>{% else %}<span class="dim">—</span>{% endif %}</td>
+<td>{% if r.review %}{{ 'Approved' if r.review.status == 'approved' else 'Changes requested' }} <span class="dim">v{{ r.review.version }}</span>{% else %}<span class="dim">Not watched</span>{% endif %}</td>
+<td><span class="badge {{ r.status.kind }}">{{ r.status.label }}</span></td>
+<td class="dim mono">{{ r.due or '—' }}</td>
+<td class="dim">{{ r.created|ago }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}<p class="dim">No jobs yet. <a href="/jobs/new">Create the first one.</a></p>{% endif %}
+{% endblock %}
+{% block scripts %}<script>
+(function(){ const q=document.getElementById('q'), f=document.getElementById('f'), h=document.getElementById('hide'), c=document.getElementById('count');
+  const rows=[...document.querySelectorAll('#jobs tbody tr')];
+  function apply(){ const t=q.value.trim().toLowerCase(), fv=f.value; let n=0;
+    rows.forEach(r=>{ const ok=(!t||r.dataset.text.includes(t))&&(!fv||r.dataset.filters.split(' ').includes(fv))&&!(h.checked&&r.dataset.state==='delivered');
+      r.classList.toggle('hidden',!ok); if(ok)n++; });
+    c.textContent=n+' of '+rows.length; }
+  [q,f,h].forEach(el=>el&&el.addEventListener('input',apply)); if(rows.length)apply(); })();
+</script>{% endblock %}
