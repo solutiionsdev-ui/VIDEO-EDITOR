@@ -4,8 +4,9 @@ It polls jobs/queue.json, takes the oldest item, runs the engine on that job (ea
 stage in its own process, exactly like `reel run`), and writes what it is doing to
 jobs/<job>/worker.json and jobs/workers/<name>.json so the Queue page can show it.
 
-    edit    footage in → every stage up to the stills → render → quality check
-    revise  the comments → changed beats re-rendered → quality check
+    edit       footage in → every stage up to the stills → render → quality check
+    revise     the comments → changed beats re-rendered → quality check
+    direction  the editor's note (and reference frames) → Claude's answer in the thread
 
 When a stage needs Claude (the beat plan, or a comment the rules cannot read) the item
 goes back on the queue as "waiting" and is picked up again once the plan file exists.
@@ -18,6 +19,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -78,6 +80,8 @@ def process_item(name: str, item: dict) -> None:
     try:
         if item["kind"] == "revise":
             result, note = _revise(job, client, item, report, log)
+        elif item["kind"] == "direction":
+            result, note = _direction(job, report, log)
         else:
             result, note = _edit(job, client, report, log)
     except Exception as e:  # noqa: BLE001 - the queue must keep moving
@@ -140,6 +144,42 @@ def _revise(job: Job, client: str | None, item: dict, report, log: Path) -> tupl
     if code != 0:
         return "failed", "revise failed (see worker.log)"
     return "done", ""
+
+
+def _direction(job: Job, report, log: Path) -> tuple[str, str]:
+    """Fold Claude Code's reply if it is there; else ask the API; else leave the request for Claude Code."""
+    from . import direction
+
+    if direction.fold_reply(job):
+        return "done", "reply from Claude Code folded into the thread"
+    if not direction.pending(job):
+        return "done", "already answered"
+    report("direction", "asking Claude")
+    with log.open("a", encoding="utf-8") as f:
+        f.write(f"\n== direction {datetime.now():%H:%M:%S}\n")
+    outcome: dict = {}
+
+    def ask() -> None:
+        try:
+            outcome["msg"] = direction.answer_with_api(job)
+        except Exception as e:  # noqa: BLE001 - reported below
+            outcome["error"] = e
+
+    t = threading.Thread(target=ask, daemon=True)
+    t.start()
+    started = ops.now_iso()
+    while t.is_alive():
+        ops.write_json(job.path / ops.WORKER_STATE, {
+            "worker": _worker_name(), "stage": "direction", "stage_started": started, "heartbeat": ops.now_iso(),
+            "kind": "direction"})
+        ops.heartbeat(_worker_name(), busy_with=job.name, stage="direction")
+        t.join(POLL_EVERY_S)
+    if "error" in outcome:
+        raise outcome["error"]
+    if outcome.get("msg"):
+        return "done", f"answered via {outcome['msg']['via']}"
+    direction.write_request(job)
+    return "waiting", "direction reply"
 
 
 def _done(job: Job, stage: str) -> bool:

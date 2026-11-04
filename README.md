@@ -125,7 +125,7 @@ it is `PLATFORM.md`; the shape copies the editing loop of Brody's FounderOS, cut
 |---|---|---|
 | Jobs | every reel, its status, the Studiio verdict, the delivered file | the job folders |
 | Queue | editors and their heartbeat, what is running (stage by stage), up next, waiting for Claude, finished today | `jobs/queue.json`, `jobs/workers/*.json`, `jobs/<job>/worker.json` |
-| Job page | the Beat Board, Approve, "What should change?", the versions | the job folder, `approvals.json` |
+| Job page | the Beat Board, Approve, "What should change?", the Direction thread, the versions | the job folder, `approvals.json`, `direction/thread.json` |
 | New job | client, title, footage by link or upload, notes, due date → on the queue | writes `jobs/<client>-<slug>/` |
 | Clients | brand, rules, the feedback log, the jobs per client | `clients/<slug>/profile.yaml` |
 
@@ -137,6 +137,15 @@ Claude, the item goes back on the queue as **waiting**: Claude Code reads `beats
 change?** becomes a `revise` item (pinned to the player's time if you leave the box ticked); only the
 changed beats re-render and the old version is marked superseded. **Approve** copies the file into
 `jobs/<job>/delivery/`.
+
+**Direction** is where the editor talks to Claude about one reel: "like the reference, when he says
+the number the stat card sits low under the face", with a screenshot or a screen recording of the
+reference attached (frames are pulled out of a recording) and the note pinned to the moment in our
+reel. A `direction` item goes on the queue; the worker asks Claude through the API when the machine
+has credentials, otherwise it writes `direction-request.md` and the job waits for Claude Code to
+write `direction-reply.json`. The reply lands in the thread as plain words plus the changes the
+renderer can make; **Apply** turns those into a `revise` item like any other revision. Claude says
+plainly when the renderer cannot do something yet. The thread lives in `jobs/<job>/direction/`.
 
 The status of a job is never stored: it is derived from the files in its folder (`renders/vN.mp4`,
 `vN-check.json`, `beats-request.md`, `approvals.json`, the queue), so a page can only show a state the

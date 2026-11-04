@@ -8,25 +8,25 @@
 <div class="label">Now running</div>
 {% for i in running %}<div class="gcard run"><div class="tile">{{ icon('film') }}</div><div>
 <h4><a class="plain" href="/jobs/{{ i.job }}">{{ i.client }} · {{ i.title }}</a></h4>
-<div class="tags"><span class="tag violet">{{ 'Revise' if i.kind == 'revise' else 'Edit' }}</span><span class="tag">{{ i.client }}</span><span class="tag green">On {{ i.claimed_by }}</span><span class="tag">{{ i.claimed_at|ago|replace(' ago', '') }} elapsed</span></div>
-<div class="pline">{{ icon('grid') }}<span>{% if i.kind == 'edit' %}{% if i.last_done %}<b>done:</b> {{ i.last_done.name }}{% if i.last_done.seconds is not none %} ({{ i.last_done.seconds }} s){% endif %} ·{% endif %} <b>now:</b> {{ i.ws.stage or 'picked up' }}{% if i.ws.stage_started %} · {{ i.ws.stage_started|ago|replace(' ago', '') }}{% endif %} · {{ i.total_n - i.done_n }} more{% else %}<b>now:</b> {{ i.ws.stage or 'picked up' }} · {{ i.comments|join(' · ') }}{% endif %}</span></div>
+<div class="tags"><span class="tag violet">{{ kinds.get(i.kind, 'Edit') }}</span><span class="tag">{{ i.client }}</span><span class="tag green">On {{ i.claimed_by }}</span><span class="tag">{{ i.claimed_at|ago|replace(' ago', '') }} elapsed</span></div>
+<div class="pline">{{ icon('grid') }}<span>{% if i.kind == 'edit' %}{% if i.last_done %}<b>done:</b> {{ i.last_done.name }}{% if i.last_done.seconds is not none %} ({{ i.last_done.seconds }} s){% endif %} ·{% endif %} <b>now:</b> {{ i.ws.stage or 'picked up' }}{% if i.ws.stage_started %} · {{ i.ws.stage_started|ago|replace(' ago', '') }}{% endif %} · {{ i.total_n - i.done_n }} more{% else %}<b>now:</b> {{ i.ws.stage or 'picked up' }} · {{ i.comments|join(' · ') or i.note }}{% endif %}</span></div>
 {% if i.log %}<div class="pline">{{ icon('clock') }}<span>{{ i.log.splitlines()[-1] }}</span></div>{% endif %}
 <div class="progress"><i style="width:{{ (i.progress * 100)|round }}%"></i></div></div></div>
 {% else %}<div class="gcard"><div class="meta">Nothing running.</div></div>{% endfor %}
 
 <div class="label">Up next</div>
 {% for i in up_next %}<div class="gcard run"><div class="tile">{{ icon('clock') }}</div><div><h4><a class="plain" href="/jobs/{{ i.job }}">{{ i.client }} · {{ i.title }}</a></h4>
-<div class="tags"><span class="tag violet">{{ 'Revise' if i.kind == 'revise' else 'Edit' }}</span><span class="tag">queued {{ i.created|ago }}</span>{% for c in i.comments %}<span class="tag">“{{ c }}”</span>{% endfor %}</div></div></div>
+<div class="tags"><span class="tag violet">{{ kinds.get(i.kind, 'Edit') }}</span><span class="tag">queued {{ i.created|ago }}</span>{% for c in i.comments %}<span class="tag">“{{ c }}”</span>{% endfor %}{% if i.note and not i.comments %}<span class="tag">“{{ i.note }}”</span>{% endif %}</div></div></div>
 {% else %}<div class="gcard"><div class="meta">Nothing waiting.</div></div>{% endfor %}
 
 {% if waiting %}<div class="label">Waiting for Claude</div>
 {% for i in waiting %}<div class="gcard run"><div class="tile">{{ icon('pause') }}</div><div><h4><a class="plain" href="/jobs/{{ i.job }}">{{ i.client }} · {{ i.title }}</a></h4>
-<div class="tags"><span class="tag amber">{{ i.waiting_on }}</span><span class="tag">{{ 'Revise' if i.kind == 'revise' else 'Edit' }}</span></div>
+<div class="tags"><span class="tag amber">{{ i.waiting_on }}</span><span class="tag">{{ kinds.get(i.kind, 'Edit') }}</span></div>
 <div class="pline">{{ icon('grid') }}<span>Claude Code reads <code>jobs/{{ i.job }}/{{ i.request }}</code> and writes <code>{{ i.plan }}</code> next to it; the editor then picks the job up again by itself.</span></div></div></div>{% endfor %}{% endif %}
 
 <div class="label">Finished today ({{ finished|length }})</div>
 {% for i in finished %}<div class="gcard run"><div class="tile">{{ icon('check') }}</div><div><h4><a class="plain" href="/jobs/{{ i.job }}">{{ i.client }} · {{ i.title }}</a></h4>
-<div class="meta">{{ 'Revise' if i.kind == 'revise' else 'Edit' }} · {{ i.finished_at|ago }} · on {{ i.claimed_by }}</div>
+<div class="meta">{{ kinds.get(i.kind, 'Edit') }} · {{ i.finished_at|ago }} · on {{ i.claimed_by }}</div>
 <div class="tags"><span class="tag {{ 'green' if i.result == 'done' else 'amber' if i.result == 'check_failed' else 'red' }}">{{ i.result|replace('_', ' ') }}</span>{% if i.error %}<span class="tag">{{ i.error }}</span>{% endif %}</div></div></div>
 {% else %}<div class="gcard"><div class="meta">Nothing finished yet today.</div></div>{% endfor %}
 {% endblock %}

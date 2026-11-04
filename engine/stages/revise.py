@@ -56,8 +56,8 @@ def run(job: Job, profile: dict, comments: list[str], show: bool = False, render
             unresolved.append(p)
 
     plan_path = job.path / PLAN
-    if unresolved:
-        if plan_path.is_file():
+    if unresolved or not comments:
+        if plan_path.is_file():   # Claude's answer to a request, or a plan written by the Direction thread
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
             changes.extend(plan.get("changes", []))
             plan_path.unlink()

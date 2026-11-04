@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ title }} · Studiio</title>
-{% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700{% if font and font != 'Inter' %}&family={{ font|replace(' ', '+') }}:wght@400;500;600;700{% endif %}&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/platform.css">
@@ -24,4 +23,8 @@
 <footer class="dim">./reel platform · {{ root }}{% if refresh %} · refreshes every {{ refresh }} s{% endif %}</footer></main>
 </div></div>
 {% block scripts %}{% endblock %}
+{% if refresh %}<script>(function(){const every={{ refresh }}*1000;function busy(){if(document.querySelector('textarea:focus,input:focus'))return true;
+if([...document.querySelectorAll('textarea')].some(t=>t.value.trim()))return true;if([...document.querySelectorAll('input[type=file]')].some(i=>i.files&&i.files.length))return true;
+return [...document.querySelectorAll('video')].some(v=>!v.paused&&!v.ended);}
+function tick(){if(busy()){setTimeout(tick,every);return;}location.reload();}setTimeout(tick,every);})();</script>{% endif %}
 </body></html>

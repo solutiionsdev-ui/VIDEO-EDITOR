@@ -8,6 +8,7 @@ Everything here is a small JSON file next to the job folders:
     jobs/<job>/worker.json     what the editor is doing on this job right now
     jobs/<job>/worker.log      the engine's output while it ran
     jobs/<job>/delivery/       the approved file
+    jobs/<job>/direction/      the editor's thread with Claude (see direction.py)
 
 A job's status is never stored. It is derived from these files and from what the
 engine itself wrote (renders/vN.mp4, vN-check.json, beats-request.md ...), so the
@@ -44,8 +45,9 @@ STAGE_OUTPUT = {
     "cuts": "cuts.json", "face": "face.json", "beats": "beats.json", "stills": "stills/index.json",
 }
 EDIT_STAGES = STAGES[:STAGES.index("stills") + 1]
-WAIT_FILES = {"beat plan": "beats-plan.json", "revision plan": "revision-plan.json"}
-REQUEST_FILES = {"beat plan": "beats-request.md", "revision plan": "revision-request.md"}
+WAIT_FILES = {"beat plan": "beats-plan.json", "revision plan": "revision-plan.json", "direction reply": "direction-reply.json"}
+REQUEST_FILES = {"beat plan": "beats-request.md", "revision plan": "revision-request.md", "direction reply": "direction-request.md"}
+KINDS = {"edit": "Edit", "revise": "Revise", "direction": "Direction"}
 
 
 # -- small helpers -----------------------------------------------------------------
@@ -347,6 +349,8 @@ def job_status(job: Job) -> dict:
                 "review": review, "running": running, "waiting": waiting, "queued": queued, "worker": wstate, **extra}
 
     if running:
+        if running.get("kind") == "direction":
+            return out("editing", "Claude is reading the direction", "warn")
         return out("editing", f"Editing · {wstate.get('stage') or 'starting'}", "warn")
     if waiting:
         return out("waiting", f"Needs Claude · {waiting.get('waiting_on')}", "warn")

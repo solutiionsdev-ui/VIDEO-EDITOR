@@ -1,7 +1,8 @@
 """`reel platform`: Jobs, Queue, the Job page (Beat Board + review), New job, Clients.
 
 Everything is read from the job folders on every request; the only things the pages
-write are the queue, the approvals and a new job folder. Listens on 127.0.0.1 only.
+write are the queue, the approvals, the Direction thread and a new job folder. Listens on
+127.0.0.1 only.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import re
 import shutil
 import threading
+import urllib.parse
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,11 +20,11 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
-from .. import ops
+from .. import direction, ops
 from ..job import RAW_EXTENSIONS, Job, JobError, console, fmt_clock, fmt_time
 from ..profile import ROOT
 from ..review import _CSS, _JS, sections
-from ..stages.revise import _BEAT_RE, _TIME_RE
+from ..stages.revise import OPS, _BEAT_RE, _TIME_RE
 
 HERE = Path(__file__).parent
 
@@ -45,6 +47,7 @@ templates.env.filters["ftime"] = fmt_time
 templates.env.globals["root"] = str(ROOT)
 templates.env.globals["icon"] = lambda name: Markup(ICONS.get(name, ""))
 templates.env.globals["queue_open"] = ops.open_count
+templates.env.globals["kinds"] = ops.KINDS
 
 app = FastAPI(title="Studiio Reel Editor", docs_url=None, redoc_url=None)
 
@@ -218,21 +221,117 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
 
 
 @app.get("/jobs/{name}", response_class=HTMLResponse)
-def job_page(request: Request, name: str):
+def job_page(request: Request, name: str, direction_error: str = ""):
     job = _job(name)
+    fold_error = None
+    try:
+        if direction.fold_reply(job):   # Claude Code answered: fold it in, close the queue item
+            for i in ops.items_for(job.name):
+                if i["kind"] == "direction" and not i.get("finished_at"):
+                    ops.finish_item(i["id"], "done")
+    except JobError as e:
+        fold_error = str(e)
     s = sections(job, base=f"/jobs/{name}/files")
     st = ops.job_status(job)
     vers = ops.versions(job)
-    items = ops.items_for(job.name)[:12]
+    all_items = ops.items_for(job.name)
     busy = st["state"] in ("editing", "queued", "waiting") or s["running"]
     request_file = ops.REQUEST_FILES.get((st.get("waiting") or {}).get("waiting_on") or "")
     editors = [w for w in ops.workers() if w.get("online")]
+    thread = direction.thread(job)
+    for m in thread:
+        for c in m.get("changes") or []:
+            c["desc"] = _change_desc(c)
+        if m.get("applied"):
+            m["apply_state"] = _apply_state(m["applied"], all_items, vers)
+    dir_items = [i for i in all_items if i["kind"] == "direction"]
     return page(request, "job.html", title=s["title"], crumb=f"content / {job.name}", nav="jobs", accent=s["accent"],
                 font=s["font"], name=job.name, job=job, meta=ops.meta(job), blocks=s["blocks"], js=_JS, st=st,
-                versions=vers, approvals=ops.read_approvals(job), items=items, log=ops.log_tail(job, 12),
+                versions=vers, approvals=ops.read_approvals(job), items=all_items[:12], log=ops.log_tail(job, 12),
                 stages=ops.stage_rows(job, (st.get("worker") or {}).get("stage")), request_file=request_file,
                 client_name=s["client_name"], refresh=5 if busy else None,
-                delivered=ops.delivered_file(job, st["version"]), editors=editors)
+                delivered=ops.delivered_file(job, st["version"]), editors=editors,
+                thread=thread, pending=direction.pending(job),
+                dir_item=next((i for i in dir_items if not i.get("finished_at")), None),
+                dir_last=dir_items[0] if dir_items else None,
+                direction_error=direction_error[:300], fold_error=fold_error)
+
+
+def _change_desc(c: dict) -> str:
+    args = c.get("args") or {}
+    try:
+        return OPS[c["op"]].format(**{**args, "factor": args.get("factor"), "words": ", ".join(args.get("words", []))})
+    except (KeyError, IndexError, TypeError):
+        return str(c.get("op"))
+
+
+def _apply_state(applied: dict, items: list[dict], vers: list[dict]) -> dict:
+    """What happened to a reply the editor applied, from the queue item it made."""
+    it = next((i for i in items if i["id"] == applied.get("item")), None)
+    if it is None:
+        return {"label": "applied", "kind": "none"}
+    if not it.get("finished_at"):
+        if it.get("claimed_by"):
+            return {"label": f"applying on {it['claimed_by']}…", "kind": "warn"}
+        if it.get("result") == "waiting":
+            return {"label": f"waiting for Claude · {it.get('waiting_on')}", "kind": "warn"}
+        return {"label": "queued", "kind": "none"}
+    if it.get("result") in ("done", "check_failed"):
+        v = next((v for v in vers if v["version"] > int(applied.get("version_before") or 0)), None)
+        if v:
+            return {"label": f"applied → v{v['version']}", "kind": "ok", "version": v["version"]}
+        return {"label": "applied", "kind": "ok"}
+    return {"label": f"failed · {it.get('error') or 'see the log'}", "kind": "bad"}
+
+
+@app.post("/jobs/{name}/direction")
+async def direction_post(name: str, text: str = Form(""), ref_url: str = Form(""), at: str = Form(""),
+                         pin: str = Form(""), files: list[UploadFile] = File(default=[])):
+    job = _job(name)
+    uploads = [f for f in files if f.filename]
+    t = None
+    if pin and at:
+        try:
+            t = float(at)
+        except ValueError:
+            t = None
+    ref = ref_url.strip()
+    if ref and not re.match(r"https?://", ref):
+        ref = "https://" + ref
+    try:
+        direction.post(job, text, ref_url=ref, at=t, files=[(f.filename, f.file) for f in uploads])
+    except JobError as e:
+        return RedirectResponse(f"/jobs/{name}?direction_error={urllib.parse.quote(str(e))}#direction", status_code=303)
+    if not any(i["kind"] == "direction" and not i.get("finished_at") for i in ops.items_for(job.name)):
+        ops.enqueue(job.name, "direction", note=(text.strip() or "reference attached")[:80])
+    return RedirectResponse(f"/jobs/{name}#direction", status_code=303)
+
+
+@app.post("/jobs/{name}/direction/ask")
+def direction_ask_again(name: str):
+    """Put the unanswered direction back on the queue (after a failed attempt)."""
+    job = _job(name)
+    asked = direction.pending(job)
+    if asked and not any(i["kind"] == "direction" and not i.get("finished_at") for i in ops.items_for(job.name)):
+        ops.enqueue(job.name, "direction", note=(asked.get("text") or "reference attached")[:80])
+    return RedirectResponse(f"/jobs/{name}#direction", status_code=303)
+
+
+@app.post("/jobs/{name}/direction/{msg_id}/apply")
+def direction_apply(name: str, msg_id: str):
+    job = _job(name)
+    try:
+        msg = direction.apply(job, msg_id)
+    except JobError as e:
+        return RedirectResponse(f"/jobs/{name}?direction_error={urllib.parse.quote(str(e))}#direction", status_code=303)
+    st = ops.job_status(job)
+    if st["version"]:
+        asked = next((m for m in direction.thread(job) if m["id"] == msg.get("reply_to")), None)
+        words = ((asked or {}).get("text") or msg["text"]).strip()
+        if len(words) > 120:
+            words = words[:120].rsplit(" ", 1)[0] + "…"
+        ops.set_review(job, "changes", st["version"], note="Direction: " + words)
+    return RedirectResponse(f"/jobs/{name}#direction", status_code=303)
 
 
 @app.post("/jobs/{name}/review")
