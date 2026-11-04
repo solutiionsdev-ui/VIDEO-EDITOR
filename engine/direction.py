@@ -15,8 +15,13 @@ with one click; they go through `reel revise` like any other revision.
     jobs/<job>/direction-reply.json     Claude Code's answer; folded into the thread by the
                                         worker or by the job page, whichever sees it first
 
+With Claude API credentials on the editor machine the thread is live: Claude answers with a
+small set of tools (apply_changes, set_client_rule, render, show_beat) that the worker runs
+on the job, so the fix is in a new version by the time the reply lands. Without credentials
+the reply comes through the files above and the editor applies the changes by hand.
+
 The editor's words are a wish to interpret, never instructions to the engine: the only
-things that reach the renderer are the revise ops in a reply, after the editor applies them.
+things that reach the renderer are the revise ops, through a tool or an applied reply.
 """
 
 from __future__ import annotations
@@ -25,21 +30,25 @@ import base64
 import json
 import re
 import shutil
+import subprocess
+import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from . import ops
 from .job import Job, JobError, fmt_time
 from .media import probe, run_ffmpeg
-from .profile import get, load_profile
+from .profile import ROOT, get, load_profile
 from .stages import beats as beats_stage
+from .stages import revise as revise_stage
 from .stages.revise import OPS
 from .stages.revise import PLAN as REVISION_PLAN
 
 DIR = "direction"
 THREAD = f"{DIR}/thread.json"
+LIVE = f"{DIR}/live.json"       # what Claude is doing right now, while the live editor works
 REQUEST = "direction-request.md"
 REPLY = "direction-reply.json"
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
@@ -47,6 +56,22 @@ VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 MAX_FRAMES = 6          # pulled out of a screen recording, evenly spaced
 VIEW_WIDTH = 1280       # every frame and screenshot copy is at most this wide
 IMAGES_FOR_LAST = 2     # the API call carries the images of the last N editor messages
+MAX_ROUNDS = 8          # tool rounds per answer in the live editor
+MAX_TOKENS = 4000
+LIVE_STALE_S = 240      # a live status older than this is ignored (the editor machine died)
+
+# Client rules the live editor may change, with how each value is checked.
+RULE_KEYS = {
+    "captions.font": ("str", None),
+    "captions.size_px": ("int", (40, 120)),
+    "captions.colour": ("hex", None),
+    "captions.active_word_colour": ("hex", None),
+    "captions.max_words_per_line": ("int", (2, 6)),
+    "brand.colours.primary": ("hex", None),
+    "brand.colours.secondary": ("hex", None),
+    "brand.colours.accent": ("hex", None),
+    "music.ducking_db": ("num", (-30, 0)),
+}
 
 ARGS_HELP = ("caption_scale{factor}, set_layout{layout: face-full|white-card}, caption_style{style: normal|emphasis}, "
              "set_text{text}, anchor{anchor: top|bottom}, shrink{factor}, set_highlight{words: [..]}; "
@@ -291,12 +316,16 @@ def validate_reply(job: Job, reply: object) -> list[str]:
         return ["the reply must be a JSON object with text and changes"]
     if not str(reply.get("text") or "").strip():
         errors.append("text is empty")
-    changes = reply.get("changes")
-    if changes is None:
+    if reply.get("changes") is None:
         reply["changes"] = []
-        changes = reply["changes"]
+    return errors + validate_changes(job, reply["changes"])
+
+
+def validate_changes(job: Job, changes: object) -> list[str]:
+    """Problems with a list of revise changes; the list is normalised in place (args, comment, rule)."""
+    errors: list[str] = []
     if not isinstance(changes, list):
-        return errors + ["changes must be a list"]
+        return ["changes must be a list"]
     beats = _beats(job)
     ids = {b["id"]: b for b in beats["beats"]} if beats else {}
     for i, ch in enumerate(changes):
@@ -323,11 +352,12 @@ def validate_reply(job: Job, reply: object) -> list[str]:
     return errors
 
 
-def append_reply(job: Job, text: str, changes: list[dict], *, via: str, usage: dict | None = None) -> dict:
+def append_reply(job: Job, text: str, changes: list[dict], *, via: str, usage: dict | None = None,
+                 did: list[dict] | None = None) -> dict:
     msgs = thread(job)
     asked = next((m for m in reversed(msgs) if m["by"] == "editor"), None)
     msg = {"id": _new_id("r"), "by": "claude", "at": ops.now_iso(), "text": str(text).strip(), "changes": list(changes),
-           "via": via, "reply_to": asked["id"] if asked else None, "applied": None, "usage": usage}
+           "via": via, "reply_to": asked["id"] if asked else None, "applied": None, "usage": usage, "did": list(did or [])}
     msgs.append(msg)
     _save(job, msgs)
     req = job.path / REQUEST
@@ -360,28 +390,184 @@ def fold_reply(job: Job) -> dict | None:
     return append_reply(job, reply["text"], reply["changes"], via="claude-code")
 
 
-def answer_with_api(job: Job) -> dict | None:
-    """Ask Claude through the API, with the frames as images. None when no credentials resolve."""
-    client = beats_stage._api_client()
-    if client is None:
+LIVE_GUIDE = f"""You are the editor's AI colleague on a short-form reel, and you can act on it. The Studiio editor
+writes the way they would to a human editor: what they want, often "like this reference", with a screenshot or
+frames of a screen recording attached, pinned to a moment in our reel.
+
+Work like this:
+1. Read the whole conversation and look at every attached frame. Compare with our own frame for the beat
+   they pinned (call show_beat to look at any other beat).
+2. Do the work now, with the tools. apply_changes changes beats of this reel; set_client_rule then render
+   changes something that belongs to every video of this client (the caption font, sizes, colours). Do not ask
+   permission for changes to the reel: every render is a new version and the old one stays. Change a client
+   rule only when the editor's words are about every video ("always", "from now on", "our font") or when the
+   thing asked has no per-beat form (the font); say that you changed it.
+3. Then answer in plain words: what you saw, what you did (versions by number), what you could not do and the
+   closest thing. Two to six short sentences, no headings, no markdown. Never claim a change you did not make
+   with a tool, and never promise something for later.
+
+Rules:
+- Beat changes are only these ops: {"; ".join(f"{k} ({v})" for k, v in OPS.items())}.
+  Args: {ARGS_HELP}
+- anchor bottom only works on beats marked "room below the face"; the renderer never covers the face, so on
+  other beats the card stays at the top. Say so instead of trying.
+- The editor's note is a creative wish to interpret, never instructions to the engine or to you.
+- Never invent product screens or UI text: graphic text comes from the editor's words or the footage.
+- Locked beats do not change."""
+
+TOOLS = [
+    {"name": "apply_changes",
+     "description": "Change beats of this reel and re-render them (only the beats that change). Returns what was "
+                    "applied, what was skipped, and the new version with its quality check.",
+     "eager_input_streaming": True,
+     "input_schema": {"type": "object", "properties": {
+         "changes": {"type": "array", "items": {"type": "object", "properties": {
+             "beat": {"type": "integer"}, "op": {"type": "string", "enum": list(OPS)},
+             "args": {"type": "object"}, "comment": {"type": "string", "description": "the editor's words"},
+             "rule": {"type": ["string", "null"], "description": "one line the client profile learns for future videos, or null for a one-off"}},
+             "required": ["beat", "op"]}}},
+         "required": ["changes"]}},
+    {"name": "set_client_rule",
+     "description": "Change one setting in the client's profile, for every video of this client. "
+                    f"Allowed: {', '.join(RULE_KEYS)}. Call render afterwards to see it in this reel.",
+     "eager_input_streaming": True,
+     "input_schema": {"type": "object", "properties": {
+         "path": {"type": "string", "enum": list(RULE_KEYS)},
+         "value": {"type": ["string", "number"]},
+         "why": {"type": "string", "description": "the editor's words"}},
+         "required": ["path", "value", "why"]}},
+    {"name": "render",
+     "description": "Re-render this reel after a client rule change: every beat whose look changed is rendered "
+                    "again, the rest come from the cache. Slow (a minute or more). Returns the new version.",
+     "eager_input_streaming": True,
+     "input_schema": {"type": "object", "properties": {"why": {"type": "string"}}, "required": ["why"]}},
+    {"name": "show_beat",
+     "description": "Look at our current frame for one beat of this reel (the storyboard still).",
+     "eager_input_streaming": True,
+     "input_schema": {"type": "object", "properties": {"beat": {"type": "integer"}}, "required": ["beat"]}},
+]
+
+
+def live_state(job: Job) -> dict | None:
+    """What the live editor is doing now, or None when nothing is running (or the status is stale)."""
+    st = ops.read_json(job.path / LIVE, None)
+    if not st:
         return None
+    since = ops.seconds_since(st.get("at"))
+    if since is None or since > LIVE_STALE_S:
+        return None
+    return st
+
+
+def _set_live(job: Job, status: str | None, partial: str | None = None, did: list[dict] | None = None) -> None:
+    path = job.path / LIVE
+    if status is None:
+        if path.is_file():
+            path.unlink()
+        return
+    prev = ops.read_json(path, {}) or {}
+    ops.write_json(path, {"status": status, "at": ops.now_iso(), "since": prev.get("since") or ops.now_iso(),
+                          "partial": partial, "did": did if did is not None else prev.get("did") or []})
+
+
+def answer_with_api(job: Job, **kw) -> dict | None:
+    """The live editor: Claude answers the thread and changes the reel through tools. None without credentials."""
+    return run_live(job, **kw)
+
+
+def run_live(job: Job, *, call=None, run_stage=None, status=None, client=None) -> dict | None:
+    """One answer of the live editor. `call(system, messages, tools, on_text)` returns the model's message
+    (the API by default; tests pass a stand-in), `run_stage(stage, extra)` runs an engine stage on the job
+    and returns its exit code (the worker passes its own), `status(text, partial=None)` reports progress."""
+    if call is None:
+        client = client or beats_stage._api_client()
+        if client is None:
+            return None
+        call = _api_call(client, job)
+    run_stage = run_stage or (lambda stage, extra=(): _run_stage(job, stage, list(extra)))
+    did: list[dict] = []
+    report = status or (lambda text, partial=None: _set_live(job, text, partial, did))
+    profile = load_profile(job.state.get("client"))
+    card = _style_card(job)
+    system = LIVE_GUIDE + ("\n\n## What the renderer can do (the style card)\n\n" + card if card else "")
+    messages: list[dict] = [{"role": "user", "content": _api_content(job)}]
+    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+    started = time.time()
+    report("reading the direction")
+    response = None
+    for _round in range(MAX_ROUNDS):
+        response = call(system=system, messages=messages, tools=TOOLS, on_text=lambda t: report("writing", t))
+        u = getattr(response, "usage", None)
+        if u is not None:
+            totals["input_tokens"] += u.input_tokens or 0
+            totals["output_tokens"] += u.output_tokens or 0
+            totals["cache_read_input_tokens"] += getattr(u, "cache_read_input_tokens", 0) or 0
+            totals["cache_creation_input_tokens"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+        if response.stop_reason == "refusal":
+            raise JobError("Claude declined to work on this direction (safety refusal).")
+        tool_uses = [b for b in response.content if b.type == "tool_use"]
+        if response.stop_reason == "max_tokens" and tool_uses:
+            raise JobError("Claude's answer was cut off before a tool call finished; ask again.")
+        if not tool_uses:
+            break
+        messages.append({"role": "assistant", "content": response.content})
+        results = []
+        for tu in tool_uses:
+            content, is_error, entry = _run_tool(job, profile, tu.name, tu.input, run_stage, report)
+            if entry:
+                did.append(entry)
+                report(entry["summary"])
+            if tu.name == "set_client_rule" and not is_error:
+                profile = load_profile(job.state.get("client"))
+            res = {"type": "tool_result", "tool_use_id": tu.id, "content": content}
+            if is_error:
+                res["is_error"] = True
+            results.append(res)
+        messages.append({"role": "user", "content": results})
+    else:
+        raise JobError(f"Claude kept calling tools; stopped after {MAX_ROUNDS} rounds. What it did is in the thread.")
+    text = "".join(getattr(b, "text", "") for b in response.content if b.type == "text").strip()
+    if not text:
+        if not did:
+            raise JobError("Claude returned no answer.")
+        text = "Done. " + " ".join(d["summary"] for d in did)
+    totals["seconds"] = round(time.time() - started, 1)
+    totals["model"] = getattr(call, "model", "stand-in")
+    usage = job.state.setdefault("usage", {})
+    usage["claude_tokens_in"] = usage.get("claude_tokens_in", 0) + totals["input_tokens"]
+    usage["claude_tokens_out"] = usage.get("claude_tokens_out", 0) + totals["output_tokens"]
+    usage["claude_tokens_cached"] = usage.get("claude_tokens_cached", 0) + totals["cache_read_input_tokens"]
+    job.save_state()
+    msg = append_reply(job, text, [], via=f"api:{totals['model']}", usage=totals, did=did)
+    if status is None:
+        _set_live(job, None)
+    return msg
+
+
+def _api_call(client, job: Job):
+    """The real call: streaming, adaptive thinking, the effort from the client profile."""
     import anthropic
 
     profile = load_profile(job.state.get("client"))
     model = str(get(profile, "ai.model", "claude-sonnet-5-5"))
     effort = str(get(profile, "ai.effort", "high"))
-    system = GUIDE + ("\n\n## What the renderer can do (the style card)\n\n" + _style_card(job) if _style_card(job) else "")
-    messages = [{"role": "user", "content": _api_content(job)}]
-    totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
-    started = time.time()
-    reply = None
-    job.log(f"  asking {model} about the direction…")
-    for _attempt in range(2):
+
+    def call(system: str, messages: list[dict], tools: list[dict], on_text):
+        job.log(f"  asking {model} (live editor)…")
         try:
-            response = client.messages.create(
-                model=model, max_tokens=4000,
-                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-                messages=messages, output_config={"effort": effort})
+            with client.messages.stream(
+                    model=model, max_tokens=MAX_TOKENS,
+                    system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                    messages=messages, tools=tools, thinking={"type": "adaptive"},
+                    output_config={"effort": effort}) as stream:
+                buf: list[str] = []
+                last = 0.0
+                for piece in stream.text_stream:
+                    buf.append(piece)
+                    if time.time() - last > 0.6:
+                        on_text("".join(buf))
+                        last = time.time()
+                return stream.get_final_message()
         except anthropic.AuthenticationError as e:
             raise JobError(f"Claude API credentials were rejected: {e.message}") from e
         except anthropic.RateLimitError as e:
@@ -390,34 +576,142 @@ def answer_with_api(job: Job) -> dict | None:
             raise JobError(f"Claude API error {e.status_code}: {e.message}") from e
         except anthropic.APIConnectionError as e:
             raise JobError(f"Could not reach the Claude API: {e}") from e
-        u = response.usage
-        totals["input_tokens"] += u.input_tokens
-        totals["output_tokens"] += u.output_tokens
-        totals["cache_read_input_tokens"] += u.cache_read_input_tokens or 0
-        totals["cache_creation_input_tokens"] += u.cache_creation_input_tokens or 0
-        if response.stop_reason == "refusal":
-            raise JobError("Claude declined to answer this direction (safety refusal).")
-        text = "".join(b.text for b in response.content if b.type == "text")
+
+    call.model = model
+    return call
+
+
+def _run_stage(job: Job, stage: str, extra: list[str]) -> int:
+    """Run an engine stage on the job in its own process, output to worker.log (the worker passes its own)."""
+    cmd = [sys.executable, "-m", "engine.cli", stage, str(job.path)]
+    if job.state.get("client"):
+        cmd += ["--client", str(job.state["client"])]
+    cmd += extra
+    with (job.path / ops.WORKER_LOG).open("a", encoding="utf-8") as f:
+        f.write(f"\n== {stage} {datetime.now():%H:%M:%S} (live editor)\n")
+        f.flush()
+        return subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=str(ROOT)).returncode
+
+
+def _run_tool(job: Job, profile: dict, name: str, inp: object, run_stage, report) -> tuple[object, bool, dict | None]:
+    """Run one tool. Returns (content for Claude, is_error, the entry for the thread or None)."""
+    inp = inp if isinstance(inp, dict) else {}
+    try:
+        if name == "apply_changes":
+            return _tool_apply(job, inp.get("changes"), run_stage, report)
+        if name == "set_client_rule":
+            return _tool_rule(job, profile, inp.get("path"), inp.get("value"), str(inp.get("why") or ""))
+        if name == "render":
+            return _tool_render(job, run_stage, report)
+        if name == "show_beat":
+            return _tool_show(job, inp.get("beat"))
+    except JobError as e:
+        return f"Error: {e}", True, None
+    return f"Error: no tool named {name}", True, None
+
+
+def _latest(job: Job) -> dict | None:
+    vers = ops.versions(job)
+    return vers[-1] if vers else None
+
+
+def _version_line(v: dict | None, before: int) -> str:
+    if not v or v["version"] <= before:
+        return "no new version was rendered"
+    check = v.get("check") or "not checked"
+    return f"rendered v{v['version']} in {v.get('seconds') or '?'} s, quality check {check}"
+
+
+def _tool_apply(job: Job, changes: object, run_stage, report) -> tuple[object, bool, dict | None]:
+    if not isinstance(changes, list) or not changes:
+        return "Error: changes must be a non-empty list", True, None
+    errors = validate_changes(job, changes)
+    if errors:
+        return "Not applied:\n- " + "\n- ".join(errors), True, None
+    plan_path = job.path / REVISION_PLAN
+    plan = ops.read_json(plan_path, {"changes": []}) if plan_path.is_file() else {"changes": []}
+    plan["changes"] = list(plan.get("changes", [])) + changes
+    ops.write_json(plan_path, plan)
+    before = (_latest(job) or {}).get("version", 0)
+    ids = sorted({int(c["beat"]) for c in changes})
+    report(f"re-rendering beat{'s' if len(ids) > 1 else ''} {', '.join(map(str, ids))}")
+    code = run_stage("revise", [])
+    v = _latest(job)
+    rounds = (ops.read_json(job.path / revise_stage.LOG, {}) or {}).get("rounds") or []
+    last = rounds[-1] if rounds else {}
+    applied = [f"beat {a.get('beat')}: {a.get('change')}" for a in last.get("applied", [])]
+    skipped = list(last.get("skipped", []))
+    if code not in (0, 5):
+        return f"Error: the revise stage failed (exit {code}); see worker.log. Applied before it failed: " \
+               + ("; ".join(applied) or "nothing"), True, None
+    summary = ("; ".join(applied) or "nothing changed") + (f" (skipped: {'; '.join(skipped)})" if skipped else "")
+    line = _version_line(v, before)
+    entry = {"tool": "apply_changes", "summary": f"{summary} → {line}", "version": v["version"] if v and v["version"] > before else None,
+             "check": v.get("check") if v else None}
+    return f"Applied: {summary}. {line}.", False, entry
+
+
+def _tool_rule(job: Job, profile: dict, path: object, value: object, why: str) -> tuple[object, bool, dict | None]:
+    if path not in RULE_KEYS:
+        return f"Error: {path!r} is not a rule the live editor may change; allowed: {', '.join(RULE_KEYS)}", True, None
+    kind, bounds = RULE_KEYS[path]
+    if kind == "str":
+        value = str(value).strip()
+        if not value or len(value) > 60:
+            return "Error: give a short text value", True, None
+    elif kind == "hex":
+        value = str(value).strip()
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
+            return "Error: a colour is #RRGGBB", True, None
+        value = value.upper()
+    else:
         try:
-            candidate = beats_stage._parse_json(text)
-            errors = validate_reply(job, candidate)
-        except (ValueError, json.JSONDecodeError) as e:
-            errors = [f"not valid JSON: {e}"]
-        if not errors:
-            reply = candidate
-            break
-        messages += [{"role": "assistant", "content": text},
-                     {"role": "user", "content": "Fix these problems and return the full corrected JSON:\n- " + "\n- ".join(errors)}]
-    if reply is None:
-        raise JobError("Claude's answer was not usable after two tries.")
-    totals["seconds"] = round(time.time() - started, 1)
-    totals["model"] = model
-    usage = job.state.setdefault("usage", {})
-    usage["claude_tokens_in"] = usage.get("claude_tokens_in", 0) + totals["input_tokens"]
-    usage["claude_tokens_out"] = usage.get("claude_tokens_out", 0) + totals["output_tokens"]
-    usage["claude_tokens_cached"] = usage.get("claude_tokens_cached", 0) + totals["cache_read_input_tokens"]
-    job.save_state()
-    return append_reply(job, reply["text"], reply["changes"], via=f"api:{model}", usage=totals)
+            value = int(value) if kind == "int" else float(value)
+        except (TypeError, ValueError):
+            return f"Error: {path} takes a number", True, None
+        if bounds and not (bounds[0] <= value <= bounds[1]):
+            return f"Error: {path} must be between {bounds[0]} and {bounds[1]}", True, None
+    if not profile.get("_path"):
+        return "Error: this job has no client profile to write to", True, None
+    old = get(profile, path)
+    feedback = [{"date": date.today().isoformat(), "comment": why, "rule": f"{path} = {value}", "scope": "video", "job": job.name}]
+    revise_stage._update_profile(profile, {path: value}, feedback)
+    client = ops.client_name(job.state.get("client"))
+    entry = {"tool": "set_client_rule", "summary": f"{path}: {old} → {value} for every {client} reel", "version": None}
+    return f"{path} is now {value} (was {old}) for every {client} reel. Call render to see it in this one.", False, entry
+
+
+def _tool_render(job: Job, run_stage, report) -> tuple[object, bool, dict | None]:
+    if not job.has("beats.json"):
+        return "Error: there is no beat plan yet, nothing to render", True, None
+    before = (_latest(job) or {}).get("version", 0)
+    report("re-rendering the reel")
+    code = run_stage("stills", [])
+    if code != 0:
+        return f"Error: the stills stage failed (exit {code}); see worker.log", True, None
+    code = run_stage("render", [])
+    v = _latest(job)
+    if code not in (0, 5):
+        return f"Error: the render failed (exit {code}); see worker.log", True, None
+    line = _version_line(v, before)
+    entry = {"tool": "render", "summary": line, "version": v["version"] if v and v["version"] > before else None,
+             "check": v.get("check") if v else None}
+    return line.capitalize() + ".", False, entry
+
+
+def _tool_show(job: Job, beat: object) -> tuple[object, bool, dict | None]:
+    try:
+        bid = int(beat)
+    except (TypeError, ValueError):
+        return "Error: beat must be a number", True, None
+    beats = _beats(job)
+    b = next((x for x in (beats or {}).get("beats", []) if x["id"] == bid), None)
+    still = _still(job, bid)
+    if not b or not still:
+        return f"Error: no still for beat {beat}", True, None
+    line = context_text(job).splitlines()
+    desc = next((ln for ln in line if ln.startswith(f"- beat {bid} ")), f"beat {bid}")
+    return [{"type": "text", "text": desc}, _image_block(still)], False, None
 
 
 def _image_block(path: Path) -> dict:

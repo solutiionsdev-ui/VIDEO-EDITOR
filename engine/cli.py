@@ -357,6 +357,11 @@ def cmd_doctor(args) -> int:
     else:
         ok = False
         console.print("[red]✖[/] Chromium for the renderer is missing — run: .venv/bin/playwright install chromium")
+    if beats._api_client() is not None:
+        console.print("[green]✔[/] Claude API credentials found: the live editor and the planner answer through the API")
+    else:
+        console.print("[yellow]![/] no Claude API credentials (set ANTHROPIC_API_KEY on the editor machine); "
+                      "the platform falls back to request files for Claude Code")
     cache = Path.home() / ".cache" / "huggingface" / "hub"
     models = sorted(p.name for p in cache.glob("models--*whisper*")) if cache.is_dir() else []
     if models:

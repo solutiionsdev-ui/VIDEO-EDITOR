@@ -141,11 +141,17 @@ changed beats re-render and the old version is marked superseded. **Approve** co
 **Direction** is where the editor talks to Claude about one reel: "like the reference, when he says
 the number the stat card sits low under the face", with a screenshot or a screen recording of the
 reference attached (frames are pulled out of a recording) and the note pinned to the moment in our
-reel. A `direction` item goes on the queue; the worker asks Claude through the API when the machine
-has credentials, otherwise it writes `direction-request.md` and the job waits for Claude Code to
-write `direction-reply.json`. The reply lands in the thread as plain words plus the changes the
-renderer can make; **Apply** turns those into a `revise` item like any other revision. Claude says
-plainly when the renderer cannot do something yet. The thread lives in `jobs/<job>/direction/`.
+reel. Cmd+Enter sends. A `direction` item goes on the queue and the worker hands it to Claude.
+
+With Claude API credentials on the editor machine (`ANTHROPIC_API_KEY`; `./reel doctor` says whether
+they resolve) the thread is **live**: Claude works with four tools the worker runs on the job —
+`apply_changes` (beats of this reel, re-rendered), `set_client_rule` then `render` (a setting for every
+video of the client, such as the caption font), and `show_beat` (look at a frame). The page shows what
+Claude is doing while it works, and the reply lands with the new version linked; nothing to apply.
+Without credentials the worker writes `direction-request.md`, the job waits for Claude Code to write
+`direction-reply.json`, and the reply's changes get an **Apply** button. Either way Claude is told
+which beats have room under the face and says plainly what the renderer cannot do. The thread lives
+in `jobs/<job>/direction/`.
 
 The status of a job is never stored: it is derived from the files in its folder (`renders/vN.mp4`,
 `vN-check.json`, `beats-request.md`, `approvals.json`, the queue), so a page can only show a state the

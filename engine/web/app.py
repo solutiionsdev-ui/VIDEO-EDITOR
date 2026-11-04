@@ -223,14 +223,7 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
 @app.get("/jobs/{name}", response_class=HTMLResponse)
 def job_page(request: Request, name: str, direction_error: str = ""):
     job = _job(name)
-    fold_error = None
-    try:
-        if direction.fold_reply(job):   # Claude Code answered: fold it in, close the queue item
-            for i in ops.items_for(job.name):
-                if i["kind"] == "direction" and not i.get("finished_at"):
-                    ops.finish_item(i["id"], "done")
-    except JobError as e:
-        fold_error = str(e)
+    fold_error = _fold(job)   # Claude Code answered through the file: fold it in, close the queue item
     s = sections(job, base=f"/jobs/{name}/files")
     st = ops.job_status(job)
     vers = ops.versions(job)
@@ -238,6 +231,28 @@ def job_page(request: Request, name: str, direction_error: str = ""):
     busy = st["state"] in ("editing", "queued", "waiting") or s["running"]
     request_file = ops.REQUEST_FILES.get((st.get("waiting") or {}).get("waiting_on") or "")
     editors = [w for w in ops.workers() if w.get("online")]
+    return page(request, "job.html", title=s["title"], crumb=f"content / {job.name}", nav="jobs", accent=s["accent"],
+                font=s["font"], name=job.name, job=job, meta=ops.meta(job), blocks=s["blocks"], js=_JS, st=st,
+                versions=vers, approvals=ops.read_approvals(job), items=all_items[:12], log=ops.log_tail(job, 12),
+                stages=ops.stage_rows(job, (st.get("worker") or {}).get("stage")), request_file=request_file,
+                client_name=s["client_name"], refresh=5 if busy else None,
+                delivered=ops.delivered_file(job, st["version"]), editors=editors,
+                direction_error=direction_error[:300], fold_error=fold_error, **_thread_ctx(job, all_items, vers))
+
+
+def _fold(job: Job) -> str | None:
+    """Fold a reply file from Claude Code into the thread and close its queue item; the error text if it was unusable."""
+    try:
+        if direction.fold_reply(job):
+            for i in ops.items_for(job.name):
+                if i["kind"] == "direction" and not i.get("finished_at"):
+                    ops.finish_item(i["id"], "done")
+    except JobError as e:
+        return str(e)
+    return None
+
+
+def _thread_ctx(job: Job, all_items: list[dict], vers: list[dict]) -> dict:
     thread = direction.thread(job)
     for m in thread:
         for c in m.get("changes") or []:
@@ -245,16 +260,22 @@ def job_page(request: Request, name: str, direction_error: str = ""):
         if m.get("applied"):
             m["apply_state"] = _apply_state(m["applied"], all_items, vers)
     dir_items = [i for i in all_items if i["kind"] == "direction"]
-    return page(request, "job.html", title=s["title"], crumb=f"content / {job.name}", nav="jobs", accent=s["accent"],
-                font=s["font"], name=job.name, job=job, meta=ops.meta(job), blocks=s["blocks"], js=_JS, st=st,
-                versions=vers, approvals=ops.read_approvals(job), items=all_items[:12], log=ops.log_tail(job, 12),
-                stages=ops.stage_rows(job, (st.get("worker") or {}).get("stage")), request_file=request_file,
-                client_name=s["client_name"], refresh=5 if busy else None,
-                delivered=ops.delivered_file(job, st["version"]), editors=editors,
-                thread=thread, pending=direction.pending(job),
-                dir_item=next((i for i in dir_items if not i.get("finished_at")), None),
-                dir_last=dir_items[0] if dir_items else None,
-                direction_error=direction_error[:300], fold_error=fold_error)
+    return {"thread": thread, "pending": direction.pending(job), "live": direction.live_state(job),
+            "dir_item": next((i for i in dir_items if not i.get("finished_at")), None),
+            "dir_last": dir_items[0] if dir_items else None}
+
+
+@app.get("/jobs/{name}/direction/thread", response_class=HTMLResponse)
+def direction_thread(request: Request, name: str):
+    """The thread alone, polled by the job page while Claude works."""
+    job = _job(name)
+    fold_error = _fold(job)
+    ctx = _thread_ctx(job, ops.items_for(job.name), ops.versions(job))
+    live = bool(ctx["live"] or (ctx["dir_item"] and not ctx["dir_item"].get("finished_at")))
+    resp = templates.TemplateResponse(request=request, name="_thread.html", context={
+        **ctx, "name": job.name, "fold_error": fold_error, "editors": [w for w in ops.workers() if w.get("online")]})
+    resp.headers["X-Live"] = "1" if live else "0"
+    return resp
 
 
 def _change_desc(c: dict) -> str:

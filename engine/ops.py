@@ -350,7 +350,9 @@ def job_status(job: Job) -> dict:
 
     if running:
         if running.get("kind") == "direction":
-            return out("editing", "Claude is reading the direction", "warn")
+            stage = wstate.get("stage")
+            label = f"Claude is working · {stage}" if stage and stage != "direction" else "Claude is reading the direction"
+            return out("editing", label, "warn")
         return out("editing", f"Editing · {wstate.get('stage') or 'starting'}", "warn")
     if waiting:
         return out("waiting", f"Needs Claude · {waiting.get('waiting_on')}", "warn")

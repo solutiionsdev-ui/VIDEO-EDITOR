@@ -88,3 +88,6 @@ main{padding:6px 16px 50px}.crumbs{padding:10px 16px 0}.row,.row3,.review{grid-t
 .msg.wait .who span{color:var(--muted)}
 .composer{border-top:1px solid var(--line);padding-top:16px}.composer textarea{min-height:84px}
 .composer label.f{margin-top:0}.composer .row{margin-top:10px}
+.cursor{display:inline-block;width:7px;height:15px;background:var(--fg);margin-left:3px;vertical-align:-2px;animation:blink 1s steps(2) infinite}
+@keyframes blink{to{opacity:0}}
+.actions .dim{font-size:12.5px}

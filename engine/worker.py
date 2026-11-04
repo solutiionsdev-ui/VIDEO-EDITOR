@@ -81,7 +81,7 @@ def process_item(name: str, item: dict) -> None:
         if item["kind"] == "revise":
             result, note = _revise(job, client, item, report, log)
         elif item["kind"] == "direction":
-            result, note = _direction(job, report, log)
+            result, note = _direction(job, client, report, log)
         else:
             result, note = _edit(job, client, report, log)
     except Exception as e:  # noqa: BLE001 - the queue must keep moving
@@ -146,8 +146,10 @@ def _revise(job: Job, client: str | None, item: dict, report, log: Path) -> tupl
     return "done", ""
 
 
-def _direction(job: Job, report, log: Path) -> tuple[str, str]:
-    """Fold Claude Code's reply if it is there; else ask the API; else leave the request for Claude Code."""
+def _direction(job: Job, client: str | None, report, log: Path) -> tuple[str, str]:
+    """Fold Claude Code's reply if it is there; else run the live editor on the API; else leave the
+    request for Claude Code. The live editor's tools run engine stages through _stage, so the job
+    page shows "revise" or "render" while Claude works."""
     from . import direction
 
     if direction.fold_reply(job):
@@ -159,9 +161,12 @@ def _direction(job: Job, report, log: Path) -> tuple[str, str]:
         f.write(f"\n== direction {datetime.now():%H:%M:%S}\n")
     outcome: dict = {}
 
+    def run_stage(stage: str, extra=()) -> int:
+        return _stage(job, client, stage, report, log, extra=list(extra))
+
     def ask() -> None:
         try:
-            outcome["msg"] = direction.answer_with_api(job)
+            outcome["msg"] = direction.answer_with_api(job, run_stage=run_stage)
         except Exception as e:  # noqa: BLE001 - reported below
             outcome["error"] = e
 
@@ -169,12 +174,18 @@ def _direction(job: Job, report, log: Path) -> tuple[str, str]:
     t.start()
     started = ops.now_iso()
     while t.is_alive():
-        ops.write_json(job.path / ops.WORKER_STATE, {
-            "worker": _worker_name(), "stage": "direction", "stage_started": started, "heartbeat": ops.now_iso(),
-            "kind": "direction"})
-        ops.heartbeat(_worker_name(), busy_with=job.name, stage="direction")
+        cur = ops.read_json(job.path / ops.WORKER_STATE, {}) or {}
+        fresh = ops.seconds_since(cur.get("heartbeat"))
+        if cur.get("stage") in (None, "direction") or fresh is None or fresh > 2 * POLL_EVERY_S:
+            ops.write_json(job.path / ops.WORKER_STATE, {
+                "worker": _worker_name(), "stage": "direction", "stage_started": started, "heartbeat": ops.now_iso(),
+                "kind": "direction"})
+            ops.heartbeat(_worker_name(), busy_with=job.name, stage="direction")
+        else:
+            ops.heartbeat(_worker_name(), busy_with=job.name, stage=cur.get("stage"))
         t.join(POLL_EVERY_S)
     if "error" in outcome:
+        direction._set_live(job, None)
         raise outcome["error"]
     if outcome.get("msg"):
         return "done", f"answered via {outcome['msg']['via']}"

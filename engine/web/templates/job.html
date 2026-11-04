@@ -35,7 +35,7 @@
 <form method="post" action="/jobs/{{ name }}/review" id="revise"><input type="hidden" name="action" value="changes"><input type="hidden" name="at" id="at"><input type="hidden" name="pin" id="pin" value="1">
 <textarea name="comments" placeholder="What should change?" {% if not st.version %}disabled{% endif %}></textarea>
 <div class="chips"><span class="chip static">General</span><button type="button" class="chip on" id="atchip" title="pin the first line to this moment">Add at 0:00</button></div>
-<div class="actions"><span class="chip static">{% if editors %}{{ editors[0].name }} · {{ 'busy' if editors[0].busy_with else 'idle' }}{% else %}no editor online{% endif %}</span><button class="btn" {% if not st.version %}disabled{% endif %}>Add to queue</button></div>
+<div class="actions"><span class="chip static">{% if editors %}{{ editors[0].name }} · {{ 'busy' if editors[0].busy_with else 'idle' }}{% else %}no editor online{% endif %}</span><button class="btn" {% if not st.version %}disabled{% endif %}>Add to queue</button><span class="dim">⌘↩ sends</span></div>
 </form>
 <p class="dim" style="margin:12px 0 0">One change per line. <code>beat 4:</code> or <code>0:32</code> at the start of a line pins it yourself; only the changed beats re-render.</p>
 </div>
@@ -51,41 +51,15 @@
 <div class="panel direction"><h3>Talk to Claude about this reel</h3>
 <p class="dim" style="margin:0 0 14px">Say what you want the way you would to an editor — “like the reference, …”. Attach a screenshot or a screen recording of the reference, pin the moment in our reel, and Claude answers with what it understood and the changes it can make. You apply them.</p>
 {% if direction_error %}<div class="err-box">{{ direction_error }}</div>{% endif %}
-{% if fold_error %}<div class="err-box">{{ fold_error }}</div>{% endif %}
-<div class="thread">
-{% for m in thread %}<div class="msg {{ m.by }}"><i class="av">{{ 'C' if m.by == 'claude' else 'S' }}</i><div>
-<div class="who"><b>{{ 'Claude' if m.by == 'claude' else 'Studiio' }}</b><span>{{ m.at|ago }}</span>
-{% if m.get('pin') is not none %}<span class="tag">at {{ m.pin|clock }}{% if m.beat %} · beat {{ m.beat }}{% endif %}</span>{% endif %}
-{% if m.ref_url %}<a class="tag" href="{{ m.ref_url }}" target="_blank" rel="noopener">reference ↗</a>{% endif %}
-{% if m.via %}<span class="tag violet">{{ 'through the API' if m.via.startswith('api') else 'through Claude Code' }}</span>{% endif %}</div>
-{% if m.text %}<p class="text">{{ m.text }}</p>{% endif %}
-{% if m.files %}<div class="shots">{% for f in m.files %}
-{% if f.kind == 'video' %}<div><video controls preload="metadata" src="/jobs/{{ name }}/files/{{ f.path }}"></video><div class="cap">{{ f.name }} · {{ f.seconds }} s{% if f.frames %} · {{ f.frames|length }} frames pulled out for Claude{% endif %}</div></div>
-{% for fr in f.frames %}<a href="/jobs/{{ name }}/files/{{ fr }}" target="_blank"><img class="small" src="/jobs/{{ name }}/files/{{ fr }}" alt=""></a>{% endfor %}
-{% elif f.kind == 'image' %}<div><a href="/jobs/{{ name }}/files/{{ f.path }}" target="_blank"><img src="/jobs/{{ name }}/files/{{ f.frames[0] if f.frames else f.path }}" alt=""></a><div class="cap">{{ f.name }}</div></div>
-{% else %}<div class="cap"><a class="open" href="/jobs/{{ name }}/files/{{ f.path }}">{{ f.name }}</a> — not an image or a video</div>{% endif %}
-{% if f.error %}<div class="cap">could not read it: {{ f.error }}</div>{% endif %}
-{% endfor %}</div>{% endif %}
-{% if m.by == 'claude' %}{% if m.changes %}<div class="changes"><div class="dim" style="margin-bottom:4px">Changes Claude can make</div>
-{% for c in m.changes %}<div>Beat {{ c.beat }} — {{ c.desc }}</div>{% endfor %}
-{% if m.apply_state %}<div class="actions"><span class="tag {{ 'green' if m.apply_state.kind == 'ok' else 'red' if m.apply_state.kind == 'bad' else 'amber' if m.apply_state.kind == 'warn' else '' }}">{{ m.apply_state.label }}</span>{% if m.apply_state.version %}<a class="open" href="/jobs/{{ name }}/files/renders/v{{ m.apply_state.version }}.mp4">Open v{{ m.apply_state.version }}</a>{% endif %}</div>
-{% else %}<form method="post" action="/jobs/{{ name }}/direction/{{ m.id }}/apply"><div class="actions"><button class="btn">Apply {{ m.changes|length }} change{{ 's' if m.changes|length != 1 else '' }}</button><span class="dim">only the beats that change re-render</span></div></form>{% endif %}</div>
-{% else %}<div class="dim" style="margin-top:6px;font-size:13px">Nothing to apply from this reply.</div>{% endif %}{% endif %}
-</div></div>{% else %}<p class="dim" style="margin:0">No direction yet.</p>{% endfor %}
-{% if pending %}<div class="msg claude wait"><i class="av">C</i><div><div class="who"><b>Claude</b>
-{% if dir_item and dir_item.claimed_by %}<span>is reading it on {{ dir_item.claimed_by }}…</span>
-{% elif dir_item and dir_item.result == 'waiting' %}<span>Waiting for Claude Code: it reads <code>jobs/{{ name }}/direction-request.md</code>, writes <code>direction-reply.json</code>, and the answer shows up here.</span>
-{% elif dir_item %}<span>Sent. An editor will hand it to Claude.{% if not editors %} None is online: start one with <code>./reel worker</code>.{% endif %}</span>
-{% elif dir_last and dir_last.result == 'failed' %}<span class="tag red">failed</span><span>{{ dir_last.error }}</span><form method="post" action="/jobs/{{ name }}/direction/ask"><button class="chip">Ask again</button></form>
-{% else %}<span>Sent, but nothing is queued for it.</span><form method="post" action="/jobs/{{ name }}/direction/ask"><button class="chip">Ask Claude</button></form>{% endif %}
-</div></div></div>{% endif %}
+<div class="thread" id="thread" data-live="{{ 1 if live or (dir_item and not dir_item.finished_at) else 0 }}">
+{% include "_thread.html" %}
 </div>
 <form method="post" action="/jobs/{{ name }}/direction" enctype="multipart/form-data" id="direct" class="composer"><input type="hidden" name="at" id="dat"><input type="hidden" name="pin" id="dpin" value="1">
 <textarea name="text" placeholder="Like the reference reel: when he says the number, the stat card slides up from the bottom. Do that here, on this beat."></textarea>
 <div class="row"><div><label class="f">Reference link (optional)</label><input type="url" name="ref_url" placeholder="https://www.instagram.com/reel/…"></div>
 <div><label class="f">Screenshot or screen recording of the reference</label><input type="file" name="files" multiple accept="image/*,video/*"></div></div>
 <div class="chips"><span class="chip static">Whole reel</span><button type="button" class="chip on" id="dchip" title="pin this note to the moment the player is at">Add at 0:00</button></div>
-<div class="actions"><span class="chip static">{% if editors %}{{ editors[0].name }} · {{ 'busy' if editors[0].busy_with else 'idle' }}{% else %}no editor online{% endif %}</span><button class="btn">Send to Claude</button></div>
+<div class="actions"><span class="chip static">{% if editors %}{{ editors[0].name }} · {{ 'busy' if editors[0].busy_with else 'idle' }}{% else %}no editor online{% endif %}</span><button class="btn">Send to Claude</button><span class="dim">⌘↩ sends · Enter makes a new line</span></div>
 </form></div></section>
 
 <section id="versions"><div class="label">Versions</div>
@@ -115,6 +89,18 @@
   }
   wire('revise', 'atchip', 'pin', 'at');
   wire('direct', 'dchip', 'dpin', 'dat');
+  document.querySelectorAll('#revise textarea, #direct textarea').forEach(t => t.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); t.form.requestSubmit(); }
+  }));
+  const box = document.getElementById('thread');
+  if (box) { let last = null;
+    const poll = async () => {
+      try { const r = await fetch('/jobs/{{ name }}/direction/thread', {cache: 'no-store'});
+        if (r.ok) { const h = await r.text(); if (h !== last) { box.innerHTML = h; last = h; }
+          box.dataset.live = r.headers.get('X-Live') || '0'; } } catch (e) {}
+      setTimeout(poll, box.dataset.live === '1' ? 1500 : 5000);
+    };
+    setTimeout(poll, 1500); }
   document.querySelectorAll('.rtabs button').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.rtabs button').forEach(x => x.classList.toggle('on', x === b));
     document.getElementById('tab-rev').style.display = b.dataset.tab === 'rev' ? '' : 'none';
