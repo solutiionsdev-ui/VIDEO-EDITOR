@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block content %}
+<div class="titlebar"><h1>Styles</h1><span class="dim">Every look the engine can render. A style is a contract: the layouts and components the planner may use, and the CSS that gives them their look.</span></div>
+{% for st in styles %}<a class="plain" href="/styles/{{ st.name }}"><div class="gcard run" style="grid-template-columns:96px 1fr">
+<div class="tile" style="width:96px;height:170px;border-radius:14px;overflow:hidden">{% if st.cover %}<img src="{{ st.cover.url }}" alt="" style="width:100%;height:100%;object-fit:cover">{% else %}{{ icon('palette') }}{% endif %}</div>
+<div><h4>{{ st.title }} <span class="dim mono" style="font-weight:400">{{ st.name }}</span></h4>
+<div class="meta">{{ st.reference }}</div>
+<div class="tags"><span class="tag violet">v{{ st.version }}</span><span class="tag {{ 'green' if st.status == 'published' else 'amber' }}">{{ st.status }}</span><span class="tag">{{ st.owner }}</span><span class="tag">{{ st.layouts|length }} layouts</span><span class="tag">{{ st.components|length }} components · {{ st.with_frame }} with a frame</span>{% for c in st.used_by %}<span class="tag green">{{ c }}</span>{% endfor %}<span class="tag">{{ st.planned }} reel{{ 's' if st.planned != 1 else '' }} planned</span></div>
+</div></div></a>
+{% else %}<div class="gcard"><div class="meta">No style in <code>styles/</code> yet.</div></div>{% endfor %}
+<p class="dim" style="margin-top:18px">A new style, a new version, or a style owned by one client: see <code>STYLES.md</code>. Client-owned styles and versions pinned per reel are the next steps.</p>
+{% endblock %}

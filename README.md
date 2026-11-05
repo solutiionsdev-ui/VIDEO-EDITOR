@@ -128,6 +128,7 @@ it is `PLATFORM.md`; the shape copies the editing loop of Brody's FounderOS, cut
 | Job page | the Beat Board, Approve, "What should change?", the Direction thread, the versions | the job folder, `approvals.json`, `direction/thread.json` |
 | New job | client, title, footage by link or upload, notes, due date → on the queue | writes `jobs/<client>-<slug>/` |
 | Clients | brand, rules, the feedback log, the jobs per client | `clients/<slug>/profile.yaml` |
+| Styles | every style with its version, layouts and components shown as real frames, the words to ask for each, who uses it | `styles/<name>/style.yaml`, the stills of the reels planned with it |
 
 How a job moves: **New job** puts an `edit` item on the queue → the worker fetches the footage
 (a Google Drive link works when the file is shared with anyone with the link), runs intake → stills,

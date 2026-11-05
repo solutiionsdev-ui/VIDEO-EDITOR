@@ -485,5 +485,63 @@ def stats(rows: list[dict]) -> dict:
     }
 
 
+# -- the style library ------------------------------------------------------------
+
+STYLES_DIR = ROOT / "styles"
+
+
+def list_styles() -> list[dict]:
+    """Every style in styles/, with its version, who uses it and how many reels were planned with it."""
+    out = []
+    clients = list_clients()
+    jobs = list_jobs()
+    for d in sorted(STYLES_DIR.iterdir()) if STYLES_DIR.is_dir() else []:
+        yml = d / "style.yaml"
+        if not d.is_dir() or not yml.is_file():
+            continue
+        try:
+            st = yaml.safe_load(yml.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            continue
+        name = str(st.get("name") or d.name)
+        used_by = [c["name"] for c in clients if str(((c["profile"].get("style") or {}).get("name")) or "ios") == name]
+        planned = sum(1 for j in jobs if j.has("beats.json") and str(read_json(j.path / "beats.json", {}).get("style")) == name)
+        out.append({
+            "name": name, "title": str(st.get("title") or name), "version": int(st.get("version") or 1),
+            "status": str(st.get("status") or "published"), "reference": str(st.get("reference") or ""),
+            "owner": "Studiio", "layouts": st.get("layouts") or {}, "components": st.get("components") or {},
+            "captions": st.get("captions") or {}, "motion": st.get("motion") or {}, "rules": st.get("rules") or [],
+            "used_by": used_by, "planned": planned, "path": str(yml.relative_to(ROOT)),
+            "files": sorted(f.name for f in d.iterdir() if f.is_file() and not f.name.startswith(".")),
+        })
+    return out
+
+
+def style_examples(name: str) -> dict:
+    """A real frame for every component and layout of a style, from the stills of the reels planned with it.
+    Newest reel first, so the frames show the latest look."""
+    comps: dict[str, dict] = {}
+    layouts: dict[str, dict] = {}
+    jobs = sorted(list_jobs(), key=lambda j: j.state.get("created") or "", reverse=True)
+    for j in jobs:
+        if not j.has("beats.json"):
+            continue
+        beats = read_json(j.path / "beats.json", {})
+        if str(beats.get("style")) != name:
+            continue
+        for b in beats.get("beats", []):
+            still = j.path / "stills" / f"beat-{b['id']:02d}.jpg"
+            if not still.is_file():
+                continue
+            ex = {"job": j.name, "beat": b["id"], "url": f"/jobs/{j.name}/files/stills/beat-{b['id']:02d}.jpg",
+                  "text": b.get("text", ""), "title": meta(j).get("title") or beats.get("title") or j.name}
+            g = b.get("graphic") or {}
+            if g.get("component") and g["component"] not in comps:
+                comps[g["component"]] = ex
+            if b.get("layout") and b["layout"] not in layouts:
+                layouts[b["layout"]] = ex
+    return {"components": comps, "layouts": layouts}
+
+
 def open_count() -> int:
     return sum(1 for i in read_queue() if not i.get("finished_at"))

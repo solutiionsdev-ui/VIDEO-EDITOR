@@ -12,6 +12,8 @@
 <a class="item {{ 'on' if nav == 'jobs' else '' }}" href="/">{{ icon('film') }}Media Tracker</a>
 <a class="item {{ 'on' if nav == 'queue' else '' }}" href="/queue">{{ icon('queue') }}Queue{% set n = queue_open() %}{% if n %}<span class="n">{{ n }}</span>{% endif %}</a>
 <a class="item {{ 'on' if nav == 'new' else '' }}" href="/jobs/new">{{ icon('plus') }}New job</a>
+<div class="group">Library</div>
+<a class="item {{ 'on' if nav == 'styles' else '' }}" href="/styles">{{ icon('palette') }}Styles</a>
 <div class="group">Clients</div>
 <a class="item {{ 'on' if nav == 'clients' else '' }}" href="/clients">{{ icon('users') }}Profiles</a>
 <div class="group">Workforce</div>

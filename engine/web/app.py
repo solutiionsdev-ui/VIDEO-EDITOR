@@ -40,6 +40,7 @@ ICONS = {
     "check": '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
     "clock": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
     "pause": '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
+    "palette": '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-.5-.2-.9-.5-1.2-.3-.4-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/></svg>',
 }
 
 templates = Jinja2Templates(directory=str(HERE / "templates"))
@@ -429,6 +430,35 @@ def job_file(name: str, path: str):
     if not str(target).startswith(str(job.path.resolve()) + "/") or not target.is_file():
         raise HTTPException(404)
     return FileResponse(target)
+
+
+@app.get("/styles", response_class=HTMLResponse)
+def styles_page(request: Request):
+    styles = ops.list_styles()
+    for st in styles:
+        ex = ops.style_examples(st["name"])
+        st["cover"] = next(iter(ex["layouts"].values()), None) or next(iter(ex["components"].values()), None)
+        st["with_frame"] = sum(1 for c in st["components"] if c in ex["components"])
+    return page(request, "styles.html", title="Styles", crumb="library / styles", nav="styles", styles=styles)
+
+
+@app.get("/styles/{name}", response_class=HTMLResponse)
+def style_page(request: Request, name: str):
+    st = next((s for s in ops.list_styles() if s["name"] == name), None)
+    if not st:
+        raise HTTPException(404)
+    ex = ops.style_examples(name)
+    comps = []
+    for cname, c in st["components"].items():
+        props = c.get("props") or {}
+        sample = ", ".join(f"{k}: {v}" for k, v in list(props.items())[:3])
+        comps.append({"name": cname, "description": c.get("description", ""), "props": props,
+                      "ask": f"beat 7: {cname} — {sample}" if sample else f"beat 7: {cname}",
+                      "frame": ex["components"].get(cname)})
+    layouts = [{"name": lname, "description": (l.get("description") or "").strip(), "anchors": l.get("graphic_anchors") or [],
+                "frame": ex["layouts"].get(lname)} for lname, l in st["layouts"].items()]
+    return page(request, "style.html", title=st["title"], crumb=f"library / styles / {name}", nav="styles", st=st,
+                comps=comps, layouts=layouts, with_frame=sum(1 for c in comps if c["frame"]))
 
 
 @app.get("/clients", response_class=HTMLResponse)

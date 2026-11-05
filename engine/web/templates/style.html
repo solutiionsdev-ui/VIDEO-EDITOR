@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% block content %}
+<div class="titlebar"><h1>{{ st.title }}</h1><div class="tags" style="margin:0"><span class="tag violet">v{{ st.version }}</span><span class="tag {{ 'green' if st.status == 'published' else 'amber' }}">{{ st.status }}</span><span class="tag">{{ st.owner }}</span>{% for c in st.used_by %}<span class="tag green">used by {{ c }}</span>{% endfor %}<span class="tag">{{ st.planned }} reel{{ 's' if st.planned != 1 else '' }} planned</span></div></div>
+<p class="dim" style="margin:0 0 6px">{{ st.reference }}</p>
+<p class="dim" style="margin:0">Contract: <code>{{ st.path }}</code> · files: {{ st.files|join(', ') }}. Frames below come from real reels planned with this style; a component without a frame has not been used in a reel yet.</p>
+
+<div class="label">Layouts</div>
+<div class="comp-grid">{% for l in layouts %}<div class="comp">
+{% if l.frame %}<a href="/jobs/{{ l.frame.job }}" title="{{ l.frame.title }} · beat {{ l.frame.beat }}"><img src="{{ l.frame.url }}" alt=""></a>{% else %}<div class="noframe">no frame yet</div>{% endif %}
+<h4>{{ l.name }}</h4><p>{{ l.description }}</p>
+{% if l.anchors %}<div class="props">graphic anchors: {{ l.anchors|join(', ') }}</div>{% endif %}
+<div class="ask">beat 7: {{ l.name }} layout</div></div>{% endfor %}</div>
+
+<div class="label">Components ({{ comps|length }}, {{ with_frame }} with a frame)</div>
+<div class="comp-grid">{% for c in comps %}<div class="comp">
+{% if c.frame %}<a href="/jobs/{{ c.frame.job }}" title="{{ c.frame.title }} · beat {{ c.frame.beat }}"><img src="{{ c.frame.url }}" alt=""></a>{% else %}<div class="noframe">no frame yet</div>{% endif %}
+<h4>{{ c.name }}</h4><p>{{ c.description }}</p>
+{% if c.props %}<div class="props">{% for k, v in c.props.items() %}<div><b>{{ k }}</b> {{ v }}</div>{% endfor %}</div>{% endif %}
+<div class="ask" title="how to ask for it in a comment or the Direction thread">{{ c.ask }}</div></div>{% endfor %}</div>
+
+<div class="label">Captions and motion</div>
+<div class="panel"><div class="row">
+<div>{% for k, v in st.captions.items() %}<div><b>{{ k }}</b> <span class="dim">{{ v if v is string else v|tojson }}</span></div>{% endfor %}</div>
+<div>{% for k, v in st.motion.items() %}<div><b>{{ k }}</b> <span class="dim">{{ v }}</span></div>{% endfor %}</div>
+</div></div>
+
+<div class="label">Rules</div>
+<div class="panel"><ul class="rules">{% for r in st.rules %}<li>{{ r }}</li>{% endfor %}</ul></div>
+{% endblock %}

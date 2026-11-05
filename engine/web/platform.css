@@ -94,3 +94,12 @@ main{padding:6px 16px 50px}.crumbs{padding:10px 16px 0}.row,.row3,.review{grid-t
 .assets{display:flex;flex-wrap:wrap;gap:10px;margin:4px 0 8px}.assets img{height:84px;border-radius:10px;border:1px solid var(--line);background:#fff;display:block}
 .assets .cap{font-size:12px;color:var(--muted);margin-top:4px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dropline{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
+/* ---- the style library ---- */
+.comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.comp{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.comp img{width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:12px;background:#000;display:block}
+.comp .noframe{width:100%;aspect-ratio:9/16;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+.comp h4{margin:6px 0 0;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600}
+.comp p{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.comp .props{font-size:12px;color:var(--muted)}.comp .props b{color:var(--fg);font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.comp .ask{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;background:rgba(0,0,0,.3);border:1px solid var(--line);padding:6px 8px;border-radius:8px;color:var(--fg);margin-top:auto;white-space:pre-wrap}

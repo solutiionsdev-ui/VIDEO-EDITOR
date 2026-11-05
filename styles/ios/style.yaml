@@ -11,6 +11,8 @@
 
 name: ios
 title: iOS
+version: 1                 # bumped on every published change; jobs record the version they were planned with
+status: published          # draft | published | retired
 reference: "HAQQ #1 reel: time pills, chat window, term-sheet card, suggested-edit card with Accept/Dismiss, email card, phone mockup; Poppins; wine/navy accents on soft white"
 
 layouts:
