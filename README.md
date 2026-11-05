@@ -154,9 +154,15 @@ Without credentials the worker writes `direction-request.md`, the job waits for 
 which beats have room under the face and says plainly what the renderer cannot do. The thread lives
 in `jobs/<job>/direction/`.
 
-**Every beat has its own box.** On the Beat Board each shot carries a direction box ("keep as is,
-or say what to change"), a graphic choice and a keep-as-is tick; **Apply all notes** posts them as
-one round of changes, the same path as the comment box, so the editor never types a beat number.
+**The job page is the Beat Board.** One light column, like the HAQQ film board: the title and the
+status line with Approve, the full sequence player, a box to talk to Claude about the whole reel, the
+beat sheet, then every shot as a panel. Under each shot is that beat's own conversation: write a
+comment (Cmd+Enter sends, a reference can be attached) and it is answered there. A note the engine's
+own rules understand ("captions smaller", "no graphic", "show chart.png") is applied at once without
+Claude; anything else goes to Claude, through the API when the machine has a key, otherwise through
+the request file for Claude Code. Every comment gets its own answer under the beat it was made on,
+and a conversation redraws only when its content changes. Versions, notes and the client's visuals
+sit in a closed section at the bottom.
 
 **Something specific in one beat.** A comment or a direction can change everything about a beat's
 graphic, including its type: `set_graphic` swaps it for any other component of the style, checked

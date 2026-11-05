@@ -1,33 +1,30 @@
-{% for m in thread %}<div class="msg {{ m.by }}"><i class="av">{{ 'C' if m.by == 'claude' else 'S' }}</i><div>
-<div class="who"><b>{{ 'Claude' if m.by == 'claude' else 'Studiio' }}</b><span>{{ m.at|ago }}</span>
-{% if m.get('pin') is not none %}<span class="tag">at {{ m.pin|clock }}{% if m.beat %} · beat {{ m.beat }}{% endif %}</span>{% endif %}
+{% for m in thread %}{% set who = 'Claude' if m.by == 'claude' else 'Engine' if m.by == 'engine' else 'Studiio' %}<div class="msg {{ m.by }}"><i class="av">{{ who[0] }}</i><div>
+<div class="who"><b>{{ who }}</b><span class="ago" data-at="{{ m.at }}">{{ m.at|ago }}</span>
+{% if not compact and m.get('pin') is not none %}<span class="tag">at {{ m.pin|clock }}{% if m.beat %} · beat {{ m.beat }}{% endif %}</span>{% endif %}
 {% if m.ref_url %}<a class="tag" href="{{ m.ref_url }}" target="_blank" rel="noopener">reference ↗</a>{% endif %}
-{% if m.via %}<span class="tag violet">{{ 'through the API' if m.via.startswith('api') else 'through Claude Code' }}</span>{% endif %}</div>
+{% if m.via %}<span class="tag violet">{{ 'through the API' if m.via.startswith('api') else 'no Claude needed' if m.via == 'rules' else 'through Claude Code' }}</span>{% endif %}</div>
 {% if m.text %}<p class="text">{{ m.text }}</p>{% endif %}
 {% if m.files %}<div class="shots">{% for f in m.files %}
-{% if f.kind == 'video' %}<div><video controls preload="metadata" src="/jobs/{{ name }}/files/{{ f.path }}"></video><div class="cap">{{ f.name }} · {{ f.seconds }} s{% if f.frames %} · {{ f.frames|length }} frames pulled out for Claude{% endif %}</div></div>
-{% for fr in f.frames %}<a href="/jobs/{{ name }}/files/{{ fr }}" target="_blank"><img class="small" src="/jobs/{{ name }}/files/{{ fr }}" alt=""></a>{% endfor %}
+{% if f.kind == 'video' %}<div><video controls preload="metadata" src="/jobs/{{ name }}/files/{{ f.path }}"></video><div class="cap">{{ f.name }} · {{ f.seconds }} s{% if f.frames %} · {{ f.frames|length }} frames for Claude{% endif %}</div></div>
+{% if not compact %}{% for fr in f.frames %}<a href="/jobs/{{ name }}/files/{{ fr }}" target="_blank"><img class="small" src="/jobs/{{ name }}/files/{{ fr }}" alt=""></a>{% endfor %}{% endif %}
 {% elif f.kind == 'image' %}<div><a href="/jobs/{{ name }}/files/{{ f.path }}" target="_blank"><img src="/jobs/{{ name }}/files/{{ f.frames[0] if f.frames else f.path }}" alt=""></a><div class="cap">{{ f.name }}</div></div>
 {% else %}<div class="cap"><a class="open" href="/jobs/{{ name }}/files/{{ f.path }}">{{ f.name }}</a> — not an image or a video</div>{% endif %}
 {% if f.error %}<div class="cap">could not read it: {{ f.error }}</div>{% endif %}
 {% endfor %}</div>{% endif %}
-{% if m.by == 'claude' %}{% if m.did %}<div class="changes"><div class="dim" style="margin-bottom:4px">What Claude did</div>
-{% for d in m.did %}<div>{{ d.summary }}{% if d.version %} · <a class="open" href="/jobs/{{ name }}/files/renders/v{{ d.version }}.mp4">Open v{{ d.version }}</a>{% endif %}</div>{% endfor %}</div>
+{% if m.by != 'editor' %}{% if m.did %}<div class="changes">{% for d in m.did %}<div>{{ d.summary }}{% if d.version %} · <a class="open" href="/jobs/{{ name }}/files/renders/v{{ d.version }}.mp4">Open v{{ d.version }}</a>{% endif %}</div>{% endfor %}</div>
 {% elif m.changes %}<div class="changes"><div class="dim" style="margin-bottom:4px">Changes Claude can make</div>
 {% for c in m.changes %}<div>Beat {{ c.beat }} — {{ c.desc }}</div>{% endfor %}
 {% if m.apply_state %}<div class="actions"><span class="tag {{ 'green' if m.apply_state.kind == 'ok' else 'red' if m.apply_state.kind == 'bad' else 'amber' if m.apply_state.kind == 'warn' else '' }}">{{ m.apply_state.label }}</span>{% if m.apply_state.version %}<a class="open" href="/jobs/{{ name }}/files/renders/v{{ m.apply_state.version }}.mp4">Open v{{ m.apply_state.version }}</a>{% endif %}</div>
-{% else %}<form method="post" action="/jobs/{{ name }}/direction/{{ m.id }}/apply"><div class="actions"><button class="btn">Apply {{ m.changes|length }} change{{ 's' if m.changes|length != 1 else '' }}</button><span class="dim">only the beats that change re-render</span></div></form>{% endif %}</div>
-{% elif m.via and m.via.startswith('api') %}<div class="dim" style="margin-top:6px;font-size:13px">Nothing changed in the reel.</div>
-{% else %}<div class="dim" style="margin-top:6px;font-size:13px">Nothing to apply from this reply.</div>{% endif %}{% endif %}
-</div></div>{% else %}<p class="dim" style="margin:0">No direction yet.</p>{% endfor %}
-{% if fold_error %}<div class="err-box">{{ fold_error }}</div>{% endif %}
-{% if live %}<div class="msg claude wait"><i class="av">C</i><div><div class="who"><b>Claude</b><span>{{ live.status }}…</span><span class="dim">{{ live.since|ago|replace(' ago', '') }}</span></div>
+{% else %}<form method="post" action="/jobs/{{ name }}/direction/{{ m.id }}/apply"><div class="actions"><button class="btn small">Apply {{ m.changes|length }} change{{ 's' if m.changes|length != 1 else '' }}</button></div></form>{% endif %}</div>
+{% endif %}{% endif %}
+</div></div>{% else %}{% if not compact %}<p class="dim" style="margin:0">Nothing said about the whole reel yet.</p>{% endif %}{% endfor %}
+{% if live %}{% set eng = live.status.startswith('applying it with') %}<div class="msg {{ 'engine' if eng else 'claude' }} wait"><i class="av">{{ 'E' if eng else 'C' }}</i><div><div class="who"><b>{{ 'Engine' if eng else 'Claude' }}</b><span>{{ live.status }}…</span><span class="dim ago" data-at="{{ live.since }}" data-bare="1">{{ live.since|ago|replace(' ago', '') }}</span></div>
 {% if live.partial %}<p class="text">{{ live.partial }}<span class="cursor"></span></p>{% endif %}
 {% if live.did %}<div class="changes">{% for d in live.did %}<div>{{ d.summary }}</div>{% endfor %}</div>{% endif %}</div></div>
 {% elif pending %}<div class="msg claude wait"><i class="av">C</i><div><div class="who"><b>Claude</b>
-{% if dir_item and dir_item.claimed_by %}<span>is reading it on {{ dir_item.claimed_by }}…</span>
-{% elif dir_item and dir_item.result == 'waiting' %}<span>Waiting for Claude Code: it reads <code>jobs/{{ name }}/direction-request.md</code>, writes <code>direction-reply.json</code>, and the answer shows up here.</span>
-{% elif dir_item %}<span>Sent. An editor will hand it to Claude.{% if not editors %} None is online: start one with <code>./reel worker</code>.{% endif %}</span>
+{% if dir_item and dir_item.claimed_by %}<span>is on it, on {{ dir_item.claimed_by }}…</span>
+{% elif dir_item and dir_item.result == 'waiting' %}<span>Waiting for Claude Code to answer{% if not compact %}: it reads <code>jobs/{{ name }}/direction-request.md</code> and writes <code>direction-reply.json</code>{% endif %}.</span>
+{% elif dir_item %}<span>Sent.{% if not editors %} No editor is online: start one with <code>./reel worker</code>.{% else %} Picked up in a moment.{% endif %}</span>
 {% elif dir_last and dir_last.result == 'failed' %}<span class="tag red">failed</span><span>{{ dir_last.error }}</span><form method="post" action="/jobs/{{ name }}/direction/ask"><button class="chip">Ask again</button></form>
 {% else %}<span>Sent, but nothing is queued for it.</span><form method="post" action="/jobs/{{ name }}/direction/ask"><button class="chip">Ask Claude</button></form>{% endif %}
 </div></div></div>{% endif %}

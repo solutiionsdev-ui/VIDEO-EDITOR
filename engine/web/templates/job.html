@@ -1,115 +1,118 @@
 {% extends "base.html" %}{% block content %}
 {{ blocks[0]|safe }}
-<div class="banner {{ st.kind }}"><strong>{{ st.label }}</strong>
-{% if st.state == 'editing' %} — on {{ st.worker.worker }}{% if st.worker.stage_started %}, this stage started {{ st.worker.stage_started|ago }}{% endif %}.
-<div class="stages">{% for s in stages %}<span class="{{ s.kind }}">{{ s.name }}{% if s.seconds is not none %} {{ s.seconds }}s{% endif %}</span>{% endfor %}</div>
-{% elif st.state == 'queued' %} — an editor will pick it up.{% if not editors %} None is online: start one with <code>./reel worker</code>.{% endif %}
-{% elif st.state == 'waiting' %} — Claude Code reads <code>jobs/{{ name }}/{{ request_file }}</code> and writes the plan next to it; the editor then continues by itself.
-{% elif st.state in ('failed', 'blocked', 'check_failed') %} — see the log below and the engine details at the bottom.
-{% elif st.state == 'to_review' %} — watch it, then approve it or write what should change.
-{% elif st.state == 'delivered' %} — <a class="open" href="/jobs/{{ name }}/files/{{ delivered }}">final in delivery</a>
-{% endif %}
-{% if meta.footage and meta.footage.type == 'link' %}<div class="dim" style="margin-top:6px">Footage link: <a href="{{ meta.footage.url }}">{{ meta.footage.url }}</a> · {{ meta.footage.status }}{% if meta.footage.error %} — {{ meta.footage.error }}{% endif %}</div>{% endif %}
-{% if log and st.state in ('editing', 'failed', 'blocked', 'check_failed') %}<pre class="log">{{ log }}</pre>{% endif %}
-</div>
 
-<section class="review">
-<div class="panel"><h3>Studiio review</h3>
+<div class="statusline" id="status" data-stamp="{{ stamp }}">
+<span class="badge {{ st.kind }}">{{ st.label }}</span>
+<span class="what">{% if st.state == 'editing' %}On {{ st.worker.worker }}{% if st.worker.stage_started %}, this step started {{ st.worker.stage_started|ago }}{% endif %}.
+{% elif st.state == 'queued' %}An editor will pick it up.{% if not editors %} None is online: start one with <code>./reel worker</code>.{% endif %}
+{% elif st.state == 'waiting' %}Claude Code reads <code>jobs/{{ name }}/{{ request_file }}</code> and answers; the edit then continues by itself.
+{% elif st.state in ('failed', 'blocked', 'check_failed') %}See the log below.
+{% elif st.state == 'to_review' %}Watch it. Approve it, or comment under the beat that is off.
+{% elif st.state == 'changes' %}Changes are on their way.
+{% elif st.state == 'delivered' %}The final file is in delivery.
+{% endif %}</span>
+<span class="grow"></span>
 {% if st.version %}
-<div class="tags"><span class="tag">v{{ st.version }}</span>{% if st.check %}<span class="tag {{ 'green' if st.check == 'pass' else 'red' if st.check == 'fail' else 'amber' }}">quality check {{ st.check }}</span>{% endif %}
-{% if st.review and st.review.version == st.version %}<span class="tag {{ 'green' if st.review.status == 'approved' else 'amber' }}">{{ 'Approved' if st.review.status == 'approved' else 'Changes requested' }} · {{ st.review.at|ago }}</span>{% elif st.review %}<span class="tag">v{{ st.review.version }} {{ 'approved' if st.review.status == 'approved' else 'sent back' }} {{ st.review.at|ago }}</span><span class="tag amber">v{{ st.version }} not watched</span>{% else %}<span class="tag amber">Not watched</span>{% endif %}</div>
-<div class="actions">
 {% if not (st.review and st.review.version == st.version and st.review.status == 'approved') %}<form method="post" action="/jobs/{{ name }}/review"><input type="hidden" name="action" value="approve"><button class="btn">Approve v{{ st.version }}</button></form>{% endif %}
-{% if delivered %}<a class="btn ghost" href="/jobs/{{ name }}/files/{{ delivered }}">Final in delivery ↗</a>{% endif %}
+{% if delivered %}<a class="btn ghost" href="/jobs/{{ name }}/files/{{ delivered }}">Final ↗</a>{% endif %}
 <a class="btn ghost" href="/jobs/{{ name }}/files/renders/v{{ st.version }}.mp4">Open v{{ st.version }} ↗</a>
+{% elif st.state in ('new', 'in_progress', 'planned', 'failed', 'blocked') %}<form method="post" action="/jobs/{{ name }}/queue"><button class="btn">{{ 'Queue again' if st.state in ('failed', 'blocked') else 'Queue for editing' }}</button></form>{% endif %}
 </div>
-<p class="dim" style="margin:12px 0 0">Approve copies the file into <code>delivery/</code>. A new version resets the verdict.</p>
-{% else %}<p class="dim">Nothing rendered yet.</p>
-{% if st.state in ('new', 'in_progress', 'planned', 'failed', 'blocked') %}<form method="post" action="/jobs/{{ name }}/queue"><div class="actions"><button class="btn">{{ 'Queue again' if st.state in ('failed', 'blocked') else 'Queue for editing' }}</button></div></form>{% endif %}
-{% endif %}
-</div>
-<div class="panel">
-<div class="rtabs"><button type="button" class="on" data-tab="rev">Revisions</button><button type="button" data-tab="notes">Notes &amp; assets</button></div>
-<div id="tab-rev">
-<p class="dim" style="margin:0 0 8px">{% if st.review and st.review.status == 'changes' and st.review.version == st.version %}Sent back: “{{ st.review.note }}”{% else %}Nothing to change yet. Pause the video where something is off and write what to change.{% endif %}</p>
-<form method="post" action="/jobs/{{ name }}/review" id="revise"><input type="hidden" name="action" value="changes"><input type="hidden" name="at" id="at"><input type="hidden" name="pin" id="pin" value="1">
-<textarea name="comments" placeholder="What should change?" {% if not st.version %}disabled{% endif %}></textarea>
-<div class="chips"><span class="chip static">General</span><button type="button" class="chip on" id="atchip" title="pin the first line to this moment">Add at 0:00</button></div>
-<div class="actions"><span class="chip static">{% if editors %}{{ editors[0].name }} · {{ 'busy' if editors[0].busy_with else 'idle' }}{% else %}no editor online{% endif %}</span><button class="btn" {% if not st.version %}disabled{% endif %}>Add to queue</button><span class="dim">⌘↩ sends</span></div>
-</form>
-<p class="dim" style="margin:12px 0 0">One change per line. <code>beat 4:</code> or <code>0:32</code> at the start of a line pins it yourself; only the changed beats re-render.</p>
-</div>
-<div id="tab-notes" style="display:none">
-<label class="f">Notes for the edit</label><p style="margin:0">{{ meta.notes or '—' }}</p>
-{% if meta.due %}<label class="f">Due</label><p style="margin:0" class="mono">{{ meta.due }}</p>{% endif %}
-<label class="f">The client's visuals</label>
-{% if assets %}<div class="assets">{% for a in assets %}<div><a href="{{ a.url }}" target="_blank"><img src="{{ a.url }}" alt=""></a><div class="cap" title="{{ a.name }}">{{ a.name }}</div></div>{% endfor %}</div>{% else %}<p class="dim" style="margin:0">None yet.</p>{% endif %}
-<form method="post" action="/jobs/{{ name }}/assets" enctype="multipart/form-data" class="dropline"><input type="file" name="files" multiple accept="image/*"><button class="btn ghost">Add</button></form>
-<p class="dim" style="margin:6px 0 0;font-size:13px">Screenshots, charts, photos the client owns. Ask for one with <code>beat 7: show chart.png</code>, or tell Claude.</p>
-<label class="f">Links</label><p style="margin:0"><a class="open" href="/jobs/{{ name }}/files/log.txt">Engine log</a> · <a class="open" href="/jobs/{{ name }}/files/worker.log">Editor log</a>{% if delivered %} · <a class="open" href="/jobs/{{ name }}/files/{{ delivered }}">Final in delivery</a>{% endif %}</p>
-</div>
-</div>
-</section>
+{% if st.state == 'editing' %}<div class="stages">{% for s in stages %}<span class="{{ s.kind }}">{{ s.name }}{% if s.seconds is not none %} {{ s.seconds }}s{% endif %}</span>{% endfor %}</div>{% endif %}
+{% if log and st.state in ('editing', 'failed', 'blocked', 'check_failed') %}<pre class="log">{{ log }}</pre>{% endif %}
+{% if direction_error %}<div class="err-box" style="margin-top:14px">{{ direction_error }}</div>{% endif %}
 
-<section id="direction"><div class="label">Direction</div>
-<div class="panel direction"><h3>Talk to Claude about this reel</h3>
-<p class="dim" style="margin:0 0 14px">Say what you want the way you would to an editor — “like the reference, …”. Attach a screenshot or a screen recording of the reference, pin the moment in our reel, and Claude answers with what it understood and the changes it can make. You apply them.</p>
-{% if direction_error %}<div class="err-box">{{ direction_error }}</div>{% endif %}
-<div class="thread" id="thread" data-live="{{ 1 if live or (dir_item and not dir_item.finished_at) else 0 }}">
-{% include "_thread.html" %}
-</div>
-<form method="post" action="/jobs/{{ name }}/direction" enctype="multipart/form-data" id="direct" class="composer"><input type="hidden" name="at" id="dat"><input type="hidden" name="pin" id="dpin" value="1">
-<textarea name="text" placeholder="Like the reference reel: when he says the number, the stat card slides up from the bottom. Do that here, on this beat."></textarea>
-<div class="row"><div><label class="f">Reference link (optional)</label><input type="url" name="ref_url" placeholder="https://www.instagram.com/reel/…"></div>
-<div><label class="f">Screenshot or screen recording of the reference</label><input type="file" name="files" multiple accept="image/*,video/*"></div></div>
-<div class="chips"><span class="chip static">Whole reel</span><button type="button" class="chip on" id="dchip" title="pin this note to the moment the player is at">Add at 0:00</button></div>
-<div class="actions"><span class="chip static">{% if editors %}{{ editors[0].name }} · {{ 'busy' if editors[0].busy_with else 'idle' }}{% else %}no editor online{% endif %}</span><button class="btn">Send to Claude</button><span class="dim">⌘↩ sends · Enter makes a new line</span></div>
+{{ blocks[1]|safe }}
+
+<section id="direction"><h2>Talk to Claude <span class="dim">about the whole reel</span></h2>
+<div class="talk">
+<div class="thread" id="thread" data-key="{{ general_key }}">{% include "_thread.html" %}</div>
+<form class="cform general" data-at="">
+<textarea rows="2" placeholder="Something about the whole reel: the pace, the music, the font, a reference you like. For one beat, comment under that beat."></textarea>
+<div class="crow"><input type="url" class="ref" placeholder="Reference link (optional)"><label class="attach">+ screenshot or recording<input type="file" multiple accept="image/*,video/*" hidden></label><span class="files"></span><button class="btn small">Send to Claude</button></div>
 </form></div></section>
 
-<section id="versions"><div class="label">Versions</div>
+{% for b in blocks[2:7] %}{{ b|safe }}{% endfor %}
+
+<details class="more" id="details"><summary>Versions, notes and the client's visuals</summary>
+<section id="versions"><h3>Versions</h3>
 {% if versions %}<table class="compact wide"><tr><th>version</th><th>rendered</th><th>changes</th><th>quality check</th><th></th></tr>
 {% for v in versions|reverse %}<tr><td class="mono">v{{ v.version }} {% if v.superseded %}<span class="tag">superseded</span>{% else %}<span class="tag violet">current</span>{% endif %}</td>
 <td class="dim">{{ v.rendered|ago }}{% if v.seconds %} · {{ v.seconds }} s to render{% endif %} · {{ v.size_mb }} MB</td>
 <td>{% if v.changes %}{% for c in v.changes %}<div>Beat {{ c.beat }} — {{ c.change }} <span class="dim">← “{{ c.comment }}”</span></div>{% endfor %}{% else %}<span class="dim">first version</span>{% endif %}</td>
 <td>{% if v.check %}<span class="tag {{ 'green' if v.check == 'pass' else 'red' if v.check == 'fail' else 'amber' }}">{{ v.check }}</span>{% else %}<span class="dim">not checked</span>{% endif %}</td>
 <td><a class="open" href="/jobs/{{ name }}/files/{{ v.file }}">Open</a></td></tr>{% endfor %}</table>
-{% else %}<p class="dim">No render yet.</p>{% endif %}
-{% if items %}<details style="margin-top:12px"><summary>Queue history for this job</summary><table class="compact wide"><tr><th>item</th><th>kind</th><th>result</th><th>when</th><th>comments</th></tr>
-{% for i in items %}<tr><td class="mono">{{ i.id }}</td><td>{{ i.kind }}</td><td>{{ i.result or ('running on ' + i.claimed_by if i.claimed_by else 'queued') }}</td><td class="dim">{{ (i.finished_at or i.created)|ago }}</td><td class="dim">{{ i.comments|join(' · ') }}{% if i.error %} — {{ i.error }}{% endif %}</td></tr>{% endfor %}</table></details>{% endif %}
-</section>
+{% else %}<p class="dim">No render yet.</p>{% endif %}</section>
+<section id="assets"><h3>The client's visuals</h3>
+{% if assets %}<div class="assets">{% for a in assets %}<div><a href="{{ a.url }}" target="_blank"><img src="{{ a.url }}" alt=""></a><div class="cap" title="{{ a.name }}">{{ a.name }}</div></div>{% endfor %}</div>{% else %}<p class="dim" style="margin:0">None yet.</p>{% endif %}
+<form method="post" action="/jobs/{{ name }}/assets" enctype="multipart/form-data" class="dropline"><input type="file" name="files" multiple accept="image/*"><button class="btn small ghost">Add</button></form>
+<p class="dim" style="margin:6px 0 0;font-size:13px">Screenshots, charts, photos the client owns. Under a beat, write <code>show chart.png</code>.</p></section>
+<section><h3>Notes</h3><p style="margin:0">{{ meta.notes or '—' }}</p>
+{% if meta.due %}<p class="dim" style="margin:6px 0 0">Due {{ meta.due }}</p>{% endif %}
+{% if meta.footage and meta.footage.type == 'link' %}<p class="dim" style="margin:6px 0 0">Footage link: <a href="{{ meta.footage.url }}">{{ meta.footage.url }}</a> · {{ meta.footage.status }}{% if meta.footage.error %} — {{ meta.footage.error }}{% endif %}</p>{% endif %}
+<p style="margin:10px 0 0"><a class="open" href="/jobs/{{ name }}/files/log.txt">Engine log</a> · <a class="open" href="/jobs/{{ name }}/files/worker.log">Editor log</a>{% if delivered %} · <a class="open" href="/jobs/{{ name }}/files/{{ delivered }}">Final in delivery</a>{% endif %}</p></section>
+{% if items %}<section><h3>Queue history</h3><table class="compact wide"><tr><th>item</th><th>kind</th><th>result</th><th>when</th><th>what</th></tr>
+{% for i in items %}<tr><td class="mono">{{ i.id }}</td><td>{{ i.kind }}</td><td>{{ i.result or ('running on ' + i.claimed_by if i.claimed_by else 'queued') }}</td><td class="dim">{{ (i.finished_at or i.created)|ago }}</td><td class="dim">{{ i.comments|join(' · ') or i.note }}{% if i.error %} — {{ i.error }}{% endif %}</td></tr>{% endfor %}</table></section>{% endif %}
+</details>
 
-{% for b in blocks[1:] %}{{ b|safe }}{% endfor %}
+{{ blocks[7]|safe }}
 {% endblock %}
 {% block scripts %}<script>{{ js|safe }}
 (function(){
-  const v = document.getElementById('main');
-  const fmt = s => { s = Math.max(0, s||0); const m = Math.floor(s/60); return m + ':' + String(Math.floor(s - m*60)).padStart(2, '0'); };
-  function wire(formId, chipId, pinId, atId) {
-    const f = document.getElementById(formId), chip = document.getElementById(chipId), pin = document.getElementById(pinId), at = document.getElementById(atId);
-    if (!f || !chip) return;
-    if (v) v.addEventListener('timeupdate', () => { if (chip.classList.contains('on')) chip.textContent = 'Add at ' + fmt(v.currentTime); });
-    chip.addEventListener('click', () => { chip.classList.toggle('on'); pin.value = chip.classList.contains('on') ? '1' : ''; chip.textContent = chip.classList.contains('on') ? 'Add at ' + fmt(v ? v.currentTime : 0) : 'Not pinned'; });
-    f.addEventListener('submit', () => { at.value = v ? v.currentTime.toFixed(1) : ''; });
+  const NAME = {{ name|tojson }};
+  const stamp0 = (document.getElementById('status') || {dataset: {}}).dataset.stamp;
+  const seen = {};
+  const typing = () => !!document.querySelector('textarea:focus, input:focus') ||
+    [...document.querySelectorAll('textarea')].some(t => t.value.trim()) ||
+    [...document.querySelectorAll('input[type=file]')].some(i => i.files && i.files.length) ||
+    [...document.querySelectorAll('video')].some(v => !v.paused && !v.ended);
+  // a conversation is redrawn only when its key changes, so a click or a playing clip is never pulled away
+  function put(el, part, slot) { if (seen[slot] === undefined) seen[slot] = el.dataset.key || '';
+    const key = part ? part.key : ''; if (seen[slot] !== key) { el.innerHTML = part ? part.html : ''; seen[slot] = key; } }
+  function ages() { const now = Date.now(); document.querySelectorAll('.ago[data-at]').forEach(el => {
+    const s = Math.max(0, (now - Date.parse(el.dataset.at)) / 1000); if (isNaN(s)) return;
+    const t = s < 60 ? Math.floor(s) + ' s' : s < 3600 ? Math.floor(s / 60) + ' min' : s < 86400 ? Math.round(s / 3600) + ' h' : (Math.floor(s / 86400) === 1 ? '1 day' : Math.floor(s / 86400) + ' days');
+    el.textContent = el.dataset.bare ? t : t + ' ago'; }); }
+  setInterval(ages, 5000);
+  async function refresh() {
+    let wait = 5000;
+    try {
+      const r = await fetch('/jobs/' + NAME + '/direction/state', {cache: 'no-store'});
+      if (r.ok) { const d = await r.json();
+        const g = document.getElementById('thread'); if (g) put(g, d.general, 'general');
+        document.querySelectorAll('.bthread').forEach(el => put(el, d.beats[el.dataset.beat], 'b' + el.dataset.beat));
+        ages();
+        if (d.live) wait = 1500;
+        if (d.stamp !== stamp0 && !d.live && !typing()) { location.reload(); return; }
+      }
+    } catch (e) {}
+    setTimeout(refresh, wait);
   }
-  wire('revise', 'atchip', 'pin', 'at');
-  wire('direct', 'dchip', 'dpin', 'dat');
-  document.querySelectorAll('#revise textarea, #direct textarea').forEach(t => t.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); t.form.requestSubmit(); }
-  }));
-  const box = document.getElementById('thread');
-  if (box) { let last = null;
-    const poll = async () => {
-      try { const r = await fetch('/jobs/{{ name }}/direction/thread', {cache: 'no-store'});
-        if (r.ok) { const h = await r.text(); if (h !== last) { box.innerHTML = h; last = h; }
-          box.dataset.live = r.headers.get('X-Live') || '0'; } } catch (e) {}
-      setTimeout(poll, box.dataset.live === '1' ? 1500 : 5000);
-    };
-    setTimeout(poll, 1500); }
-  if (location.hash === '#assets') { const nb = document.querySelector('.rtabs button[data-tab=notes]'); if (nb) setTimeout(() => nb.click(), 0); }
-  document.querySelectorAll('.rtabs button').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('.rtabs button').forEach(x => x.classList.toggle('on', x === b));
-    document.getElementById('tab-rev').style.display = b.dataset.tab === 'rev' ? '' : 'none';
-    document.getElementById('tab-notes').style.display = b.dataset.tab === 'notes' ? '' : 'none';
-  }));
+  setTimeout(refresh, 800);
+
+  document.querySelectorAll('form.cform').forEach(f => {
+    const ta = f.querySelector('textarea'), fi = f.querySelector('input[type=file]'), names = f.querySelector('.files'), btn = f.querySelector('button');
+    const label = btn.textContent;
+    if (fi) fi.addEventListener('change', () => { names.textContent = [...fi.files].map(x => x.name).join(', '); });
+    ta.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); f.requestSubmit(); } });
+    f.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const ref = f.querySelector('input.ref');
+      if (!ta.value.trim() && !(fi && fi.files.length)) { ta.focus(); return; }
+      const fd = new FormData(); fd.append('text', ta.value);
+      if (f.dataset.at) { fd.append('at', f.dataset.at); fd.append('pin', '1'); }
+      if (ref && ref.value.trim()) fd.append('ref_url', ref.value.trim());
+      if (fi) [...fi.files].forEach(x => fd.append('files', x));
+      btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const r = await fetch('/jobs/' + NAME + '/direction', {method: 'POST', body: fd, headers: {'X-Requested-With': 'fetch'}});
+        if (r.ok) { ta.value = ''; if (fi) fi.value = ''; if (ref) ref.value = ''; names.textContent = ''; }
+        else { const d = await r.json().catch(() => ({})); names.textContent = d.error || 'Could not send it.'; }
+      } catch (e) { names.textContent = 'Could not send it.'; }
+      btn.disabled = false; btn.textContent = label;
+      refresh();
+    });
+  });
+  if (['#assets', '#versions', '#details'].includes(location.hash)) { const d = document.getElementById('details'); if (d) d.open = true; }
 })();
 </script>{% endblock %}

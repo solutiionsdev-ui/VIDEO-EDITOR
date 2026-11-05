@@ -147,50 +147,61 @@ def _revise(job: Job, client: str | None, item: dict, report, log: Path) -> tupl
 
 
 def _direction(job: Job, client: str | None, report, log: Path) -> tuple[str, str]:
-    """Fold Claude Code's reply if it is there; else run the live editor on the API; else leave the
-    request for Claude Code. The live editor's tools run engine stages through _stage, so the job
-    page shows "revise" or "render" while Claude works."""
+    """Answer every comment that waits in the job's thread. A note the engine's own rules understand is
+    applied at once; the rest goes to Claude through the API; without credentials the request file is
+    written and the item waits for Claude Code. Stages run through _stage, so the job page shows them."""
     from . import direction
-
-    if direction.fold_reply(job):
-        return "done", "reply from Claude Code folded into the thread"
-    if not direction.pending(job):
-        return "done", "already answered"
-    report("direction", "asking Claude")
-    with log.open("a", encoding="utf-8") as f:
-        f.write(f"\n== direction {datetime.now():%H:%M:%S}\n")
-    outcome: dict = {}
 
     def run_stage(stage: str, extra=()) -> int:
         return _stage(job, client, stage, report, log, extra=list(extra))
 
-    def ask() -> None:
-        try:
-            outcome["msg"] = direction.answer_with_api(job, run_stage=run_stage)
-        except Exception as e:  # noqa: BLE001 - reported below
-            outcome["error"] = e
+    answered = 1 if direction.fold_reply(job) else 0
+    for _round in range(40):
+        waiting = direction.unanswered(job)
+        if not waiting:
+            return "done", f"{answered} answer(s) in the thread" if answered else "already answered"
+        report("direction", "reading the comments")
+        with log.open("a", encoding="utf-8") as f:
+            f.write(f"\n== direction {datetime.now():%H:%M:%S} · {len(waiting)} comment(s) waiting\n")
+        by_rules = 0
+        for msg in waiting:
+            if direction.try_rules(job, msg, run_stage):
+                by_rules += 1
+        if by_rules:
+            answered += by_rules
+            continue
+        target = waiting[0]
+        outcome: dict = {}
 
-    t = threading.Thread(target=ask, daemon=True)
-    t.start()
-    started = ops.now_iso()
-    while t.is_alive():
-        cur = ops.read_json(job.path / ops.WORKER_STATE, {}) or {}
-        fresh = ops.seconds_since(cur.get("heartbeat"))
-        if cur.get("stage") in (None, "direction") or fresh is None or fresh > 2 * POLL_EVERY_S:
-            ops.write_json(job.path / ops.WORKER_STATE, {
-                "worker": _worker_name(), "stage": "direction", "stage_started": started, "heartbeat": ops.now_iso(),
-                "kind": "direction"})
-            ops.heartbeat(_worker_name(), busy_with=job.name, stage="direction")
-        else:
-            ops.heartbeat(_worker_name(), busy_with=job.name, stage=cur.get("stage"))
-        t.join(POLL_EVERY_S)
-    if "error" in outcome:
-        direction._set_live(job, None)
-        raise outcome["error"]
-    if outcome.get("msg"):
-        return "done", f"answered via {outcome['msg']['via']}"
-    direction.write_request(job)
-    return "waiting", "direction reply"
+        def ask() -> None:
+            try:
+                outcome["msg"] = direction.answer_with_api(job, run_stage=run_stage, target=target)
+            except Exception as e:  # noqa: BLE001 - reported below
+                outcome["error"] = e
+
+        t = threading.Thread(target=ask, daemon=True)
+        t.start()
+        started = ops.now_iso()
+        while t.is_alive():
+            cur = ops.read_json(job.path / ops.WORKER_STATE, {}) or {}
+            fresh = ops.seconds_since(cur.get("heartbeat"))
+            if cur.get("stage") in (None, "direction") or fresh is None or fresh > 2 * POLL_EVERY_S:
+                ops.write_json(job.path / ops.WORKER_STATE, {
+                    "worker": _worker_name(), "stage": "direction", "stage_started": started, "heartbeat": ops.now_iso(),
+                    "kind": "direction"})
+                ops.heartbeat(_worker_name(), busy_with=job.name, stage="direction")
+            else:
+                ops.heartbeat(_worker_name(), busy_with=job.name, stage=cur.get("stage"))
+            t.join(POLL_EVERY_S)
+        if "error" in outcome:
+            direction._set_live(job, None)
+            raise outcome["error"]
+        if outcome.get("msg"):
+            answered += 1
+            continue
+        direction.write_request(job)
+        return "waiting", "direction reply"
+    return "failed", "too many comments in one go; the rest are still in the thread"
 
 
 def _done(job: Job, stage: str) -> bool:

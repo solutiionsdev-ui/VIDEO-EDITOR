@@ -88,6 +88,7 @@ they point at, and answer with JSON only:
 
 {{"text": "...", "changes": [{{"beat": 4, "op": "anchor", "args": {{"anchor": "bottom"}}, "comment": "<the editor's words>", "rule": "<one line the client profile learns for future videos, or null for a one-off>"}}]}}
 
+- Add "reply_to": "<message id>" when you answer a message other than the one named at the end.
 - text: two to six short sentences to the editor, plain words, no headings and no markdown. Say what you
   understood from the reference, what you are changing, and what the renderer cannot do yet (say it
   plainly and offer the closest thing; never promise what the ops below cannot express).
@@ -115,10 +116,17 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}"
 
 
-def pending(job: Job) -> dict | None:
-    """The newest editor message, when Claude has not answered after it."""
+def unanswered(job: Job) -> list[dict]:
+    """Editor messages no reply points at yet, oldest first. Every comment gets its own answer."""
     msgs = thread(job)
-    return msgs[-1] if msgs and msgs[-1]["by"] == "editor" else None
+    answered = {m.get("reply_to") for m in msgs if m["by"] != "editor"}
+    return [m for m in msgs if m["by"] == "editor" and m["id"] not in answered]
+
+
+def pending(job: Job) -> dict | None:
+    """The oldest editor message still waiting for an answer."""
+    waiting = unanswered(job)
+    return waiting[0] if waiting else None
 
 
 def beat_at(job: Job, t: float | None) -> int | None:
@@ -260,8 +268,9 @@ def _style_card(job: Job) -> str:
 def _message_lines(job: Job, m: dict, absolute: bool) -> list[str]:
     """One message as text; file paths absolute for Claude Code, relative otherwise."""
     root = job.path if absolute else Path(".")
-    who = "Studiio editor" if m["by"] == "editor" else f"Claude ({m.get('via', '')})"
-    head = f"### {who} · {m['at']}"
+    who = ("Studiio editor" if m["by"] == "editor" else "The engine's own rules" if m["by"] == "engine"
+           else f"Claude ({m.get('via', '')})")
+    head = f"### {who} · {m['at']} · id {m['id']}"
     if m.get("pin") is not None:
         head += f" · pinned at {fmt_time(m['pin'])}" + (f" (beat {m['beat']})" if m.get("beat") else " (no beat there)")
     lines = [head]
@@ -302,7 +311,15 @@ def request_text(job: Job) -> str:
     lines += ["## The conversation", ""]
     for m in thread(job):
         lines += _message_lines(job, m, absolute=True) + [""]
-    lines.append("Answer the latest editor message now.")
+    target = pending(job)
+    waiting = unanswered(job)
+    if target:
+        where = f", pinned to beat {target['beat']}" if target.get("beat") else ", about the whole reel"
+        lines.append(f"Answer this message now (id {target['id']}{where}): {target.get('text') or '(a reference, no words)'}")
+        if len(waiting) > 1:
+            lines.append(f"{len(waiting) - 1} more message(s) wait after it. Answer them in the same file with "
+                         '{"replies": [{"reply_to": "<message id>", "text": "...", "changes": [...]}, ...]}, '
+                         "or one at a time: a new request is written after each answer.")
     return "\n".join(lines)
 
 
@@ -367,11 +384,14 @@ def validate_changes(job: Job, changes: object) -> list[str]:
 
 
 def append_reply(job: Job, text: str, changes: list[dict], *, via: str, usage: dict | None = None,
-                 did: list[dict] | None = None) -> dict:
+                 did: list[dict] | None = None, reply_to: str | None = None, by: str = "claude") -> dict:
+    """Add an answer to the thread. It answers `reply_to`, else the oldest message still waiting."""
     msgs = thread(job)
-    asked = next((m for m in reversed(msgs) if m["by"] == "editor"), None)
-    msg = {"id": _new_id("r"), "by": "claude", "at": ops.now_iso(), "text": str(text).strip(), "changes": list(changes),
-           "via": via, "reply_to": asked["id"] if asked else None, "applied": None, "usage": usage, "did": list(did or [])}
+    if reply_to is None or not any(m["id"] == reply_to and m["by"] == "editor" for m in msgs):
+        asked = pending(job) or next((m for m in reversed(msgs) if m["by"] == "editor"), None)
+        reply_to = asked["id"] if asked else None
+    msg = {"id": _new_id("r"), "by": by, "at": ops.now_iso(), "text": str(text).strip(), "changes": list(changes),
+           "via": via, "reply_to": reply_to, "applied": None, "usage": usage, "did": list(did or [])}
     msgs.append(msg)
     _save(job, msgs)
     req = job.path / REQUEST
@@ -392,16 +412,21 @@ def fold_reply(job: Job) -> dict | None:
         src.replace(hold)
     except FileNotFoundError:
         return None
+    replies: list = []
     try:
-        reply = json.loads(hold.read_text(encoding="utf-8"))
-        errors = validate_reply(job, reply)
+        data = json.loads(hold.read_text(encoding="utf-8"))
+        replies = data["replies"] if isinstance(data, dict) and isinstance(data.get("replies"), list) else [data]
+        errors = [e for r in replies for e in validate_reply(job, r)]
     except ValueError as e:
         errors = [f"not valid JSON: {e}"]
-    if errors:
+    if errors or not replies:
         bad = hold.with_name(hold.name.replace("reply-", "reply-invalid-", 1))
         hold.replace(bad)
-        raise JobError(f"{REPLY} was not usable ({'; '.join(errors)}); kept as {_rel(job, bad)}. Write it again.")
-    return append_reply(job, reply["text"], reply["changes"], via="claude-code")
+        raise JobError(f"{REPLY} was not usable ({'; '.join(errors) or 'empty'}); kept as {_rel(job, bad)}. Write it again.")
+    out = None
+    for r in replies:
+        out = append_reply(job, r["text"], r["changes"], via="claude-code", reply_to=r.get("reply_to"))
+    return out
 
 
 LIVE_GUIDE = f"""You are the editor's AI colleague on a short-form reel, and you can act on it. The Studiio editor
@@ -473,15 +498,19 @@ def live_state(job: Job) -> dict | None:
     return st
 
 
-def _set_live(job: Job, status: str | None, partial: str | None = None, did: list[dict] | None = None) -> None:
+def _set_live(job: Job, status: str | None, partial: str | None = None, did: list[dict] | None = None,
+              target: str | None = None) -> None:
     path = job.path / LIVE
     if status is None:
         if path.is_file():
             path.unlink()
         return
     prev = ops.read_json(path, {}) or {}
-    ops.write_json(path, {"status": status, "at": ops.now_iso(), "since": prev.get("since") or ops.now_iso(),
-                          "partial": partial, "did": did if did is not None else prev.get("did") or []})
+    same = target is None or prev.get("target") == target
+    ops.write_json(path, {"status": status, "at": ops.now_iso(),
+                          "since": (prev.get("since") if same else None) or ops.now_iso(), "partial": partial,
+                          "did": did if did is not None else (prev.get("did") if same else None) or [],
+                          "target": target or prev.get("target")})
 
 
 def answer_with_api(job: Job, **kw) -> dict | None:
@@ -489,7 +518,45 @@ def answer_with_api(job: Job, **kw) -> dict | None:
     return run_live(job, **kw)
 
 
-def run_live(job: Job, *, call=None, run_stage=None, status=None, client=None) -> dict | None:
+def try_rules(job: Job, msg: dict, run_stage=None) -> dict | None:
+    """A note on one beat that the engine's own rules understand ("captions bigger", "no graphic",
+    "show chart.png") is applied at once, without Claude. Returns the answer, or None when Claude has
+    to read it: a reference attached, a note about the whole reel, or words the rules do not know."""
+    if msg.get("files") or msg.get("ref_url") or not msg.get("text") or not msg.get("beat"):
+        return None
+    beats = _beats(job)
+    if not beats:
+        return None
+    profile = load_profile(job.state.get("client"))
+    assets = beats_stage.asset_files(job, profile)
+    lines = [ln.strip() for ln in msg["text"].splitlines() if ln.strip()]
+    comments = [ln if (revise_stage._BEAT_RE.match(ln) or revise_stage._TIME_RE.match(ln)) else f"beat {msg['beat']}: {ln}"
+                for ln in lines]
+    for c in comments:
+        if revise_stage.interpret(revise_stage.parse_comment(c, beats), beats, profile, assets) is None:
+            return None
+    run_stage = run_stage or (lambda stage, extra=(): _run_stage(job, stage, list(extra)))
+    before = (_latest(job) or {}).get("version", 0)
+    _set_live(job, "applying it with the engine's own rules", target=msg["id"], did=[])
+    code = run_stage("revise", comments)
+    v = _latest(job)
+    last = ((ops.read_json(job.path / revise_stage.LOG, {}) or {}).get("rounds") or [{}])[-1]
+    applied = [f"beat {a.get('beat')}: {a.get('change')}" for a in last.get("applied", [])]
+    skipped = list(last.get("skipped", []))
+    if code not in (0, 5):
+        _set_live(job, None)
+        raise JobError(f"the revise stage failed (exit {code}); see worker.log")
+    line = _version_line(v, before)
+    summary = ("; ".join(applied) or "nothing changed") + (f" (skipped: {'; '.join(skipped)})" if skipped else "")
+    entry = {"tool": "rules", "summary": f"{summary} → {line}", "version": v["version"] if v and v["version"] > before else None,
+             "check": v.get("check") if v else None}
+    reply = append_reply(job, "Done, without needing Claude: the engine's own rules cover this.", [], via="rules",
+                         did=[entry], reply_to=msg["id"], by="engine")
+    _set_live(job, None)
+    return reply
+
+
+def run_live(job: Job, *, call=None, run_stage=None, status=None, client=None, target: dict | None = None) -> dict | None:
     """One answer of the live editor. `call(system, messages, tools, on_text)` returns the model's message
     (the API by default; tests pass a stand-in), `run_stage(stage, extra)` runs an engine stage on the job
     and returns its exit code (the worker passes its own), `status(text, partial=None)` reports progress."""
@@ -499,12 +566,14 @@ def run_live(job: Job, *, call=None, run_stage=None, status=None, client=None) -
             return None
         call = _api_call(client, job)
     run_stage = run_stage or (lambda stage, extra=(): _run_stage(job, stage, list(extra)))
+    target = target or pending(job)
+    target_id = target["id"] if target else None
     did: list[dict] = []
-    report = status or (lambda text, partial=None: _set_live(job, text, partial, did))
+    report = status or (lambda text, partial=None: _set_live(job, text, partial, did, target=target_id))
     profile = load_profile(job.state.get("client"))
     card = _style_card(job)
     system = LIVE_GUIDE + ("\n\n## What the renderer can do (the style card)\n\n" + card if card else "")
-    messages: list[dict] = [{"role": "user", "content": _api_content(job)}]
+    messages: list[dict] = [{"role": "user", "content": _api_content(job, target)}]
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
     started = time.time()
     report("reading the direction")
@@ -552,7 +621,7 @@ def run_live(job: Job, *, call=None, run_stage=None, status=None, client=None) -
     usage["claude_tokens_out"] = usage.get("claude_tokens_out", 0) + totals["output_tokens"]
     usage["claude_tokens_cached"] = usage.get("claude_tokens_cached", 0) + totals["cache_read_input_tokens"]
     job.save_state()
-    msg = append_reply(job, text, [], via=f"api:{totals['model']}", usage=totals, did=did)
+    msg = append_reply(job, text, [], via=f"api:{totals['model']}", usage=totals, did=did, reply_to=target_id)
     if status is None:
         _set_live(job, None)
     return msg
@@ -733,10 +802,12 @@ def _image_block(path: Path) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
 
 
-def _api_content(job: Job) -> list[dict]:
-    """The job, then the thread with images for the last few editor messages."""
+def _api_content(job: Job, target: dict | None = None) -> list[dict]:
+    """The job, then the thread with images for the last few editor messages and the one being answered."""
     msgs = thread(job)
     editor_ids = [m["id"] for m in msgs if m["by"] == "editor"][-IMAGES_FOR_LAST:]
+    if target:
+        editor_ids.append(target["id"])
     blocks: list[dict] = [{"type": "text", "text": context_text(job)}, {"type": "text", "text": "## The conversation"}]
     for m in msgs:
         with_images = m["id"] in editor_ids
@@ -755,7 +826,12 @@ def _api_content(job: Job) -> list[dict]:
         if still:
             blocks.append({"type": "text", "text": f"[our current frame for beat {m['beat']}]"})
             blocks.append(_image_block(still))
-    blocks.append({"type": "text", "text": "Answer the latest editor message now, as JSON."})
+    if target:
+        where = f", pinned to beat {target['beat']}" if target.get("beat") else ", about the whole reel"
+        blocks.append({"type": "text", "text": f"Answer this editor message now (id {target['id']}{where}): "
+                                               f"{target.get('text') or '(a reference, no words)'}"})
+    else:
+        blocks.append({"type": "text", "text": "Answer the latest editor message now."})
     return blocks
 
 

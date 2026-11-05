@@ -7,6 +7,8 @@ write are the queue, the approvals, the Direction thread and a new job folder. L
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shutil
 import threading
@@ -16,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
@@ -226,22 +228,26 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
 @app.get("/jobs/{name}", response_class=HTMLResponse)
 def job_page(request: Request, name: str, direction_error: str = ""):
     job = _job(name)
-    fold_error = _fold(job)   # Claude Code answered through the file: fold it in, close the queue item
-    s = sections(job, base=f"/jobs/{name}/files", board=_board(job))
+    fold_error = _fold(job)   # Claude Code answered through the file: fold it in
     st = ops.job_status(job)
     vers = ops.versions(job)
     all_items = ops.items_for(job.name)
-    busy = st["state"] in ("editing", "queued", "waiting") or s["running"]
-    request_file = ops.REQUEST_FILES.get((st.get("waiting") or {}).get("waiting_on") or "")
     editors = [w for w in ops.workers() if w.get("online")]
+    groups = _groups(job, all_items, vers)
+    board = None
+    if job.has("beats.json"):
+        board = {"action": f"/jobs/{job.name}/direction",
+                 "threads": {bid: (ctx["key"], _thread_html(job, ctx, editors)) for bid, ctx in groups["beats"].items()}}
+    s = sections(job, base=f"/jobs/{name}/files", board=board)
+    request_file = ops.REQUEST_FILES.get((st.get("waiting") or {}).get("waiting_on") or "")
     return page(request, "job.html", title=s["title"], crumb=f"content / {job.name}", nav="jobs", accent=s["accent"],
                 font=s["font"], name=job.name, job=job, meta=ops.meta(job), blocks=s["blocks"], js=_JS, st=st,
                 versions=vers, approvals=ops.read_approvals(job), items=all_items[:12], log=ops.log_tail(job, 12),
                 stages=ops.stage_rows(job, (st.get("worker") or {}).get("stage")), request_file=request_file,
-                client_name=s["client_name"], refresh=5 if busy else None,
+                client_name=s["client_name"], refresh=None, stamp=_stamp(st),
                 delivered=ops.delivered_file(job, st["version"]), editors=editors,
                 direction_error=direction_error[:300], fold_error=fold_error, assets=_assets(job),
-                **_thread_ctx(job, all_items, vers))
+                general_key=groups["general"]["key"], **{k: v for k, v in groups["general"].items() if k != "key"})
 
 
 def _assets(job: Job) -> list[dict]:
@@ -272,15 +278,6 @@ async def add_assets(name: str, files: list[UploadFile] = File(default=[])):
     return RedirectResponse(f"/jobs/{name}#assets", status_code=303)
 
 
-def _board(job: Job) -> dict | None:
-    """The per-beat direction boxes on the Beat Board: where they post and which graphics can be picked."""
-    if not job.has("beats.json"):
-        return None
-    style = load_style(str(ops.read_json(job.path / "beats.json", {}).get("style") or "ios"))
-    comps = [c for c in (style.get("components") or {}) if c not in ("asset", "logo-end-card")]
-    return {"action": f"/jobs/{job.name}/board", "components": comps}
-
-
 def _request_changes(job: Job, lines: list[str]) -> None:
     """One round of changes: the Studiio verdict goes to 'changes' and a revise item carries the lines."""
     st = ops.job_status(job)
@@ -289,70 +286,92 @@ def _request_changes(job: Job, lines: list[str]) -> None:
     ops.enqueue(job.name, "revise", comments=lines)
 
 
-@app.post("/jobs/{name}/board")
-async def board_post(request: Request, name: str):
-    """The Beat Board's per-beat boxes, turned into comment lines the revise stage understands."""
-    job = _job(name)
-    form = await request.form()
-    beats = ops.read_json(job.path / "beats.json", {}).get("beats", []) if job.has("beats.json") else []
-    lines: list[str] = []
-    for b in beats:
-        bid = b["id"]
-        note = str(form.get(f"note_{bid}") or "").strip()
-        comp = str(form.get(f"comp_{bid}") or "").strip()
-        lock = bool(form.get(f"lock_{bid}"))
-        if note:
-            lines.append(f"beat {bid}: {note}")
-        if comp == "none":
-            lines.append(f"beat {bid}: no graphic")
-        elif comp:
-            lines.append(f"beat {bid}: make the graphic a {comp}")
-        if lock and not b.get("locked"):
-            lines.append(f"beat {bid}: lock")
-        elif not lock and b.get("locked"):
-            lines.append(f"beat {bid}: unlock")
-    if not lines:
-        return RedirectResponse(f"/jobs/{name}?direction_error={urllib.parse.quote('Nothing to apply: write under a beat, pick a graphic, or tick keep as is.')}#shots", status_code=303)
-    _request_changes(job, lines)
-    return RedirectResponse(f"/jobs/{name}#shots", status_code=303)
-
-
 def _fold(job: Job) -> str | None:
-    """Fold a reply file from Claude Code into the thread and close its queue item; the error text if it was unusable."""
+    """Fold a reply file from Claude Code into the thread. With nothing left waiting the queue item is
+    closed; otherwise it goes back on the queue so the next comment is handled. Returns the error text
+    when the file was unusable."""
     try:
         if direction.fold_reply(job):
+            more = bool(direction.unanswered(job))
             for i in ops.items_for(job.name):
-                if i["kind"] == "direction" and not i.get("finished_at"):
-                    ops.finish_item(i["id"], "done")
+                if i["kind"] == "direction" and not i.get("finished_at") and not i.get("claimed_by"):
+                    if more:
+                        ops.update_item(i["id"], result=None, waiting_on=None)
+                    else:
+                        ops.finish_item(i["id"], "done")
     except JobError as e:
         return str(e)
     return None
 
 
-def _thread_ctx(job: Job, all_items: list[dict], vers: list[dict]) -> dict:
-    thread = direction.thread(job)
-    for m in thread:
+def _stamp(st: dict) -> str:
+    """Changes when the page's own state (not the threads) is out of date: a new version, a new status."""
+    return f"{st['state']}|{st['version']}|{st['label']}"
+
+
+def _groups(job: Job, all_items: list[dict], vers: list[dict]) -> dict:
+    """The thread split by where a comment was made: one conversation per beat, one for the whole reel.
+    A reply sits with the comment it answers."""
+    msgs = direction.thread(job)
+    by_id = {m["id"]: m for m in msgs}
+    for m in msgs:
         for c in m.get("changes") or []:
             c["desc"] = _change_desc(c)
         if m.get("applied"):
             m["apply_state"] = _apply_state(m["applied"], all_items, vers)
+
+    def where(m: dict):
+        if m["by"] == "editor":
+            return m.get("beat") if m.get("pin") is not None else None
+        parent = by_id.get(m.get("reply_to"))
+        return where(parent) if parent and parent["by"] == "editor" else None
+
+    groups: dict = {}
+    for m in msgs:
+        groups.setdefault(where(m), []).append(m)
+    waiting = direction.unanswered(job)
+    live = direction.live_state(job)
+    editors_online = any(w.get("online") for w in ops.workers())
     dir_items = [i for i in all_items if i["kind"] == "direction"]
-    return {"thread": thread, "pending": direction.pending(job), "live": direction.live_state(job),
-            "dir_item": next((i for i in dir_items if not i.get("finished_at")), None),
-            "dir_last": dir_items[0] if dir_items else None}
+    dir_item = next((i for i in dir_items if not i.get("finished_at")), None)
+    dir_last = dir_items[0] if dir_items else None
+
+    def ctx(key) -> dict:
+        g = groups.get(key, [])
+        ids = {m["id"] for m in g}
+        mine = live if live and (live.get("target") in ids or (key is None and not live.get("target"))) else None
+        pend = next((m for m in waiting if m["id"] in ids), None)
+        # the key changes only when what is shown changes, so the page redraws a conversation only then
+        shown = [[m["id"], (m.get("apply_state") or {}).get("label"), len(m.get("did") or [])] for m in g]
+        state = [mine and [mine.get("status"), mine.get("partial"), [d.get("summary") for d in mine.get("did") or []]],
+                 pend and [pend["id"], dir_item and [dir_item.get("claimed_by"), dir_item.get("result")],
+                           dir_last and dir_last.get("result"), bool(editors_online)]]
+        digest = hashlib.sha1(json.dumps([shown, state], sort_keys=True, default=str).encode()).hexdigest()[:12]
+        return {"thread": g, "live": mine, "pending": pend, "dir_item": dir_item, "dir_last": dir_last, "key": digest}
+
+    return {"general": ctx(None), "beats": {k: ctx(k) for k in groups if k is not None},
+            "busy": bool(live or (waiting and dir_item))}
 
 
-@app.get("/jobs/{name}/direction/thread", response_class=HTMLResponse)
-def direction_thread(request: Request, name: str):
-    """The thread alone, polled by the job page while Claude works."""
+def _thread_html(job: Job, ctx: dict, editors: list[dict], compact: bool = True) -> str:
+    return templates.env.get_template("_thread.html").render(
+        **{k: v for k, v in ctx.items() if k != "key"}, name=job.name, editors=editors, fold_error=None, compact=compact)
+
+
+@app.get("/jobs/{name}/direction/state")
+def direction_state(name: str):
+    """What the job page polls: every conversation as HTML, whether Claude is busy, and a stamp that
+    changes when the rest of the page is out of date."""
     job = _job(name)
     fold_error = _fold(job)
-    ctx = _thread_ctx(job, ops.items_for(job.name), ops.versions(job))
-    live = bool(ctx["live"] or (ctx["dir_item"] and not ctx["dir_item"].get("finished_at")))
-    resp = templates.TemplateResponse(request=request, name="_thread.html", context={
-        **ctx, "name": job.name, "fold_error": fold_error, "editors": [w for w in ops.workers() if w.get("online")]})
-    resp.headers["X-Live"] = "1" if live else "0"
-    return resp
+    editors = [w for w in ops.workers() if w.get("online")]
+    groups = _groups(job, ops.items_for(job.name), ops.versions(job))
+    general = _thread_html(job, groups["general"], editors, compact=False)
+    if fold_error:
+        general = f'<div class="err-box">{Markup.escape(fold_error)}</div>' + general
+    return {"live": groups["busy"], "stamp": _stamp(ops.job_status(job)),
+            "general": {"key": groups["general"]["key"] + ("!" if fold_error else ""), "html": general},
+            "beats": {str(k): {"key": c["key"], "html": _thread_html(job, c, editors)} for k, c in groups["beats"].items()}}
 
 
 def _change_desc(c: dict) -> str:
@@ -383,9 +402,10 @@ def _apply_state(applied: dict, items: list[dict], vers: list[dict]) -> dict:
 
 
 @app.post("/jobs/{name}/direction")
-async def direction_post(name: str, text: str = Form(""), ref_url: str = Form(""), at: str = Form(""),
-                         pin: str = Form(""), files: list[UploadFile] = File(default=[])):
+async def direction_post(request: Request, name: str, text: str = Form(""), ref_url: str = Form(""),
+                         at: str = Form(""), pin: str = Form(""), files: list[UploadFile] = File(default=[])):
     job = _job(name)
+    by_script = request.headers.get("x-requested-with") == "fetch"
     uploads = [f for f in files if f.filename]
     t = None
     if pin and at:
@@ -399,9 +419,17 @@ async def direction_post(name: str, text: str = Form(""), ref_url: str = Form(""
     try:
         direction.post(job, text, ref_url=ref, at=t, files=[(f.filename, f.file) for f in uploads])
     except JobError as e:
+        if by_script:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         return RedirectResponse(f"/jobs/{name}?direction_error={urllib.parse.quote(str(e))}#direction", status_code=303)
-    if not any(i["kind"] == "direction" and not i.get("finished_at") for i in ops.items_for(job.name)):
+    open_items = [i for i in ops.items_for(job.name) if i["kind"] == "direction" and not i.get("finished_at")]
+    if not open_items:
         ops.enqueue(job.name, "direction", note=(text.strip() or "reference attached")[:80])
+    for i in open_items:   # an item waiting for Claude Code goes back on the queue: the new comment may not need Claude
+        if i.get("result") == "waiting" and not i.get("claimed_by"):
+            ops.update_item(i["id"], result=None, waiting_on=None)
+    if by_script:
+        return JSONResponse({"ok": True})
     return RedirectResponse(f"/jobs/{name}#direction", status_code=303)
 
 

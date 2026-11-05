@@ -173,8 +173,10 @@ breakdown sheet). What was taken and what was left, so the next idea gets the sa
 
 Taken:
 - A catalog of what the engine can render, as real frames: the Styles page.
-- A direction box on every beat of the Beat Board, with a graphic choice and "keep as is", posted
-  as one round. The editor never types a beat number.
+- A conversation under every beat of the Beat Board: a comment there is answered there, by the
+  engine's own rules when they cover it and by Claude otherwise. The editor never types a beat number.
+- The look of the HAQQ film board for the whole platform: light, one column, a top bar, the client's
+  accent on buttons and bars.
 - Something specific in one beat: the graphic swap and the client's own visuals as a component.
 
 Refused:

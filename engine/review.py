@@ -297,8 +297,8 @@ def _beats_table(beats: dict | None) -> str:
 
 
 def _shots(job: Job, beats: dict | None, base: str = "", board: dict | None = None) -> str:
-    """One card per beat. With `board` ({"action": url, "components": [...]}) every card gets a direction box,
-    a graphic choice and a keep-as-is tick, posted together as one round of changes."""
+    """One card per beat. With `board` ({"action": url, "threads": {beat id: html}}) every card carries its own
+    conversation with Claude: the comments made on that beat, the answers, and a box to write the next one."""
     if not beats:
         return ""
     from .stages.beats import graphic_line
@@ -312,33 +312,26 @@ def _shots(job: Job, beats: dict | None, base: str = "", board: dict | None = No
         g = b.get("graphic")
         sub = f"{b['duration']:.2f} s · {esc(b['layout'])}" + (f" · {esc(graphic_line(g))}" if g else "")
         locked = ' <span class="badge warn">kept as is</span>' if b.get("locked") else ""
-        direct = ""
+        talk = ""
         if board:
             bid = b["id"]
-            current = (g or {}).get("component")
-            options = [f'<option value="">graphic: {esc(current) if current else "none"} (keep)</option>']
-            if current:
-                options.append('<option value="none">no graphic</option>')
-            options += [f'<option value="{esc(c)}">{esc(c)}</option>' for c in board.get("components", []) if c != current]
-            direct = (f'<div class="direct"><textarea name="note_{bid}" rows="2" placeholder="Keep as is, or say what to change"></textarea>'
-                      f'<div class="drow"><select name="comp_{bid}">{"".join(options)}</select>'
-                      f'<label class="toggle"><input type="checkbox" name="lock_{bid}" value="1"{" checked" if b.get("locked") else ""}> keep as is</label></div></div>')
+            tkey, thtml = board.get("threads", {}).get(bid, ("", ""))
+            talk = (f'<div class="bcomment"><div class="bthread" data-beat="{bid}" data-key="{esc(tkey)}">{thtml}</div>'
+                    f'<form class="cform" data-at="{b["start"] + 0.05:.2f}">'
+                    f'<textarea rows="2" placeholder="Comment on beat {bid}. Claude reads it and fixes it."></textarea>'
+                    f'<div class="crow"><label class="attach">+ reference<input type="file" multiple accept="image/*,video/*" hidden></label>'
+                    f'<span class="files"></span><button class="btn small">Send</button></div></form></div>')
         cards.append(
             f'<figure class="shot" data-id="{b["id"]}" data-start="{b["start"]}" data-end="{b["end"]}">'
             f'<div class="frame">{pic}</div><div class="bar"><i></i></div>'
             f'<figcaption><strong>Beat {b["id"]} · {esc(b["name"])}</strong>{locked} <span class="dim">{sub}</span>'
             f'<div class="line" dir="auto">{esc(b["text"])}</div></figcaption>'
-            f'<button type="button" class="btn small replay" data-start="{b["start"]}" data-end="{b["end"]}">Replay</button>{direct}</figure>')
+            f'<button type="button" class="btn small replay" data-start="{b["start"]}" data-end="{b["end"]}">Replay</button>{talk}</figure>')
     kind = "Rendered stills, one per beat." if (job.path / "stills").is_dir() else \
         "Frames from the cut preview for now; the renderer will replace them with the real stills, graphics in place."
-    grid = f'<div class="grid">{"".join(cards)}</div>'
     if board:
-        grid = (f'<form method="post" action="{esc(board["action"])}" id="board">{grid}'
-                f'<div class="actions"><button class="btn">Apply all notes</button>'
-                f'<span class="dim">Only the beats you touched change and re-render. Simple notes apply by themselves; '
-                f'the rest goes to Claude.</span></div></form>')
-        kind += " Write under any beat what should change, pick another graphic, or tick keep as is."
-    return f'<section id="shots"><h2>Every shot</h2><p class="dim">{kind}</p>{grid}</section>'
+        kind += " Comment under any beat: Claude reads it, fixes that beat, and answers there."
+    return f'<section id="shots"><h2>Every shot</h2><p class="dim">{kind}</p><div class="grid">{"".join(cards)}</div></section>'
 
 
 def _copy(beats: dict | None, client_name: str) -> str:
