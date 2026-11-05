@@ -25,7 +25,7 @@ from ..job import RAW_EXTENSIONS, Job, JobError, console, fmt_clock, fmt_time
 from ..profile import CLIENTS_DIR, ROOT
 from ..review import _CSS, _JS, sections
 from ..profile import load_profile
-from ..stages.beats import ASSET_EXT, asset_files
+from ..stages.beats import ASSET_EXT, asset_files, load_style
 from ..stages.revise import OPS, _BEAT_RE, _TIME_RE
 
 HERE = Path(__file__).parent
@@ -227,7 +227,7 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
 def job_page(request: Request, name: str, direction_error: str = ""):
     job = _job(name)
     fold_error = _fold(job)   # Claude Code answered through the file: fold it in, close the queue item
-    s = sections(job, base=f"/jobs/{name}/files")
+    s = sections(job, base=f"/jobs/{name}/files", board=_board(job))
     st = ops.job_status(job)
     vers = ops.versions(job)
     all_items = ops.items_for(job.name)
@@ -270,6 +270,51 @@ async def add_assets(name: str, files: list[UploadFile] = File(default=[])):
         with (folder / safe).open("wb") as out:
             shutil.copyfileobj(f.file, out, 1 << 20)
     return RedirectResponse(f"/jobs/{name}#assets", status_code=303)
+
+
+def _board(job: Job) -> dict | None:
+    """The per-beat direction boxes on the Beat Board: where they post and which graphics can be picked."""
+    if not job.has("beats.json"):
+        return None
+    style = load_style(str(ops.read_json(job.path / "beats.json", {}).get("style") or "ios"))
+    comps = [c for c in (style.get("components") or {}) if c not in ("asset", "logo-end-card")]
+    return {"action": f"/jobs/{job.name}/board", "components": comps}
+
+
+def _request_changes(job: Job, lines: list[str]) -> None:
+    """One round of changes: the Studiio verdict goes to 'changes' and a revise item carries the lines."""
+    st = ops.job_status(job)
+    if st["version"]:
+        ops.set_review(job, "changes", st["version"], note="\n".join(lines))
+    ops.enqueue(job.name, "revise", comments=lines)
+
+
+@app.post("/jobs/{name}/board")
+async def board_post(request: Request, name: str):
+    """The Beat Board's per-beat boxes, turned into comment lines the revise stage understands."""
+    job = _job(name)
+    form = await request.form()
+    beats = ops.read_json(job.path / "beats.json", {}).get("beats", []) if job.has("beats.json") else []
+    lines: list[str] = []
+    for b in beats:
+        bid = b["id"]
+        note = str(form.get(f"note_{bid}") or "").strip()
+        comp = str(form.get(f"comp_{bid}") or "").strip()
+        lock = bool(form.get(f"lock_{bid}"))
+        if note:
+            lines.append(f"beat {bid}: {note}")
+        if comp == "none":
+            lines.append(f"beat {bid}: no graphic")
+        elif comp:
+            lines.append(f"beat {bid}: make the graphic a {comp}")
+        if lock and not b.get("locked"):
+            lines.append(f"beat {bid}: lock")
+        elif not lock and b.get("locked"):
+            lines.append(f"beat {bid}: unlock")
+    if not lines:
+        return RedirectResponse(f"/jobs/{name}?direction_error={urllib.parse.quote('Nothing to apply: write under a beat, pick a graphic, or tick keep as is.')}#shots", status_code=303)
+    _request_changes(job, lines)
+    return RedirectResponse(f"/jobs/{name}#shots", status_code=303)
 
 
 def _fold(job: Job) -> str | None:
@@ -409,8 +454,7 @@ def review(name: str, action: str = Form(...), comments: str = Form(""), at: str
             if t is not None and not (_BEAT_RE.match(lines[0]) or _TIME_RE.match(lines[0])):
                 m, sec = divmod(int(round(t)), 60)
                 lines[0] = f"{m}:{sec:02d} {lines[0]}"
-        ops.set_review(job, "changes", st["version"], note="\n".join(lines))
-        ops.enqueue(job.name, "revise", comments=lines)
+        _request_changes(job, lines)
     else:
         raise HTTPException(400, "unknown action")
     return RedirectResponse(f"/jobs/{name}", status_code=303)

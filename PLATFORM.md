@@ -165,3 +165,24 @@ the earlier versions marked superseded; Approve, which put the file in `delivery
 first ten HAQQ reels, still needs real footage. One change from the plan above: the code lives in
 `engine/web/` and `engine/ops.py` rather than a `platform/` folder, because Python already has a
 module called `platform`.
+
+## Borrowed and refused (2026-11-05)
+
+Three of Torsten Roscoe's posts were studied this week (the style menu, the seven reel styles, the
+breakdown sheet). What was taken and what was left, so the next idea gets the same test.
+
+Taken:
+- A catalog of what the engine can render, as real frames: the Styles page.
+- A direction box on every beat of the Beat Board, with a graphic choice and "keep as is", posted
+  as one round. The editor never types a beat number.
+- Something specific in one beat: the graphic swap and the client's own visuals as a component.
+
+Refused:
+- A sheet that lives as an artifact inside one chat session. Ours is server-backed: it survives
+  sessions and machines, the worker and the live editor read the same files.
+- Headless Claude Code behind a customer product. Logins expire and usage windows stall every
+  customer at once; the API is the backbone, Claude Code stays the operator's tool.
+- Mixing styles beat by beat. One visual language per reel; variety comes from layouts, components
+  and the client's own visuals (`STYLES.md`).
+- "10X" claims. Every feature here is judged by what it does to a real reel, not by a hook line.
+

@@ -154,6 +154,10 @@ Without credentials the worker writes `direction-request.md`, the job waits for 
 which beats have room under the face and says plainly what the renderer cannot do. The thread lives
 in `jobs/<job>/direction/`.
 
+**Every beat has its own box.** On the Beat Board each shot carries a direction box ("keep as is,
+or say what to change"), a graphic choice and a keep-as-is tick; **Apply all notes** posts them as
+one round of changes, the same path as the comment box, so the editor never types a beat number.
+
 **Something specific in one beat.** A comment or a direction can change everything about a beat's
 graphic, including its type: `set_graphic` swaps it for any other component of the style, checked
 against the style card (props, word limits, anchors). The `asset` component shows one of the client's
