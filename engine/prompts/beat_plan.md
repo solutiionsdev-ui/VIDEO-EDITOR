@@ -38,6 +38,8 @@ planning for a renderer, not for a person: be literal, use only the listed compo
    colour in the accent; use them on roughly a third of the beats, on the word that carries the
    meaning.
 7. B-roll. Only files listed under "B-roll available". If none are listed, broll is always null.
+   The asset component works the same way: only a file listed under "Client visuals available".
+   If none are listed, never use asset.
 8. Music. One mood and tempo for the whole reel, from the client's preferences.
 
 # Output
@@ -51,6 +53,7 @@ Return JSON only, matching this shape exactly:
 Duration after the cut: {duration}
 Client note: {note}
 B-roll available: {broll}
+Client visuals available for the asset component: {assets}
 
 Script (what is said, in order):
 {script}

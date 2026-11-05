@@ -42,7 +42,7 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
                                    TimeElapsedColumn(), console=console, transient=True) as progress:
         task = progress.add_task("s", total=n + (1 if beats.get("end_card") else 0))
         for i, beat in enumerate(beats["beats"]):
-            spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == n - 1))
+            spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == n - 1), job_dir=job.path)
             t = still_time(spec)
             frame = compose.extract_frame(base, beat["start"] + t, tmp / f"frame-{beat['id']:02d}.jpg")
             out = stills_dir / f"beat-{beat['id']:02d}.jpg"

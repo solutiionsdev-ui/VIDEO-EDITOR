@@ -113,9 +113,27 @@ def brand_spec(profile: dict) -> dict:
     }
 
 
-def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last: bool) -> dict:
+def asset_src(props: dict, job_dir: Path | None, profile: dict) -> dict:
+    """Where an asset component's file is (jobs/<job>/assets/ first, then the client's assets/), as the page needs it."""
+    name = str(props.get("file") or "")
+    dirs = [Path(job_dir) / "assets"] if job_dir else []
+    if profile.get("_path"):
+        dirs.append(Path(profile["_path"]).parent / "assets")
+    for d in dirs:
+        f = d / name
+        if name and "/" not in name and f.is_file():
+            st = f.stat()
+            return {"src": f.resolve().as_uri(), "stamp": f"{st.st_size}-{int(st.st_mtime)}"}
+    return {"src": "", "stamp": "missing"}
+
+
+def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last: bool, job_dir: Path | None = None) -> dict:
     """Everything the page needs to render one beat, with times relative to the beat start."""
     caps = profile.get("captions", {}) or {}
+    graphic = beat.get("graphic")
+    if graphic and graphic.get("component") == "asset":
+        props = graphic.get("props") or {}
+        graphic = {**graphic, "props": {**props, **asset_src(props, job_dir, profile)}}
     words: list[dict] = []
     for w in beat.get("words", []):
         token = {"w": w["w"], "start": round(w["start"] - beat["start"], 3), "end": round(w["end"] - beat["start"], 3)}
@@ -138,7 +156,7 @@ def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last
         },
         "safe": SAFE,
         "beat": {
-            "id": beat["id"], "layout": beat["layout"], "graphic": beat.get("graphic"),
+            "id": beat["id"], "layout": beat["layout"], "graphic": graphic,
             "caption": beat.get("caption") or {"style": "normal", "highlight": []},
             "duration": float(beat["duration"]), "words": words, "no_go": beat.get("no_go"),
             "is_first": is_first, "is_last": is_last, "hold_widget": False,

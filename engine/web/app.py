@@ -22,8 +22,10 @@ from markupsafe import Markup
 
 from .. import direction, ops
 from ..job import RAW_EXTENSIONS, Job, JobError, console, fmt_clock, fmt_time
-from ..profile import ROOT
+from ..profile import CLIENTS_DIR, ROOT
 from ..review import _CSS, _JS, sections
+from ..profile import load_profile
+from ..stages.beats import ASSET_EXT, asset_files
 from ..stages.revise import OPS, _BEAT_RE, _TIME_RE
 
 HERE = Path(__file__).parent
@@ -237,7 +239,36 @@ def job_page(request: Request, name: str, direction_error: str = ""):
                 stages=ops.stage_rows(job, (st.get("worker") or {}).get("stage")), request_file=request_file,
                 client_name=s["client_name"], refresh=5 if busy else None,
                 delivered=ops.delivered_file(job, st["version"]), editors=editors,
-                direction_error=direction_error[:300], fold_error=fold_error, **_thread_ctx(job, all_items, vers))
+                direction_error=direction_error[:300], fold_error=fold_error, assets=_assets(job),
+                **_thread_ctx(job, all_items, vers))
+
+
+def _assets(job: Job) -> list[dict]:
+    """The client's visuals this job can use, with a URL the page can show."""
+    client = job.state.get("client")
+    out = []
+    for name, path in asset_files(job, load_profile(client)).items():
+        if path.parent == job.path / "assets":
+            out.append({"name": name, "url": f"/jobs/{job.name}/files/assets/{name}", "where": "this reel"})
+        else:
+            out.append({"name": name, "url": f"/clients/{client}/files/assets/{name}", "where": "client"})
+    return out
+
+
+@app.post("/jobs/{name}/assets")
+async def add_assets(name: str, files: list[UploadFile] = File(default=[])):
+    job = _job(name)
+    uploads = [f for f in files if f.filename]
+    bad = [f.filename for f in uploads if Path(f.filename).suffix.lower() not in ASSET_EXT]
+    if bad:
+        return RedirectResponse(f"/jobs/{name}?direction_error={urllib.parse.quote('not an image: ' + ', '.join(bad))}#assets", status_code=303)
+    folder = job.path / "assets"
+    folder.mkdir(exist_ok=True)
+    for f in uploads:
+        safe = re.sub(r"[^\w.\-]+", "_", Path(f.filename).name).strip("._") or "asset.png"
+        with (folder / safe).open("wb") as out:
+            shutil.copyfileobj(f.file, out, 1 << 20)
+    return RedirectResponse(f"/jobs/{name}#assets", status_code=303)
 
 
 def _fold(job: Job) -> str | None:
@@ -403,6 +434,17 @@ def job_file(name: str, path: str):
 @app.get("/clients", response_class=HTMLResponse)
 def clients_page(request: Request):
     return page(request, "clients.html", title="Clients", crumb="clients", nav="clients", clients=ops.list_clients())
+
+
+@app.get("/clients/{slug}/files/{path:path}")
+def client_file(slug: str, path: str):
+    if not re.fullmatch(r"[\w.\-]+", slug) or slug.startswith((".", "_")):
+        raise HTTPException(404)
+    base = (CLIENTS_DIR / slug).resolve()
+    target = (base / path).resolve()
+    if not str(target).startswith(str(base) + "/") or not target.is_file():
+        raise HTTPException(404)
+    return FileResponse(target)
 
 
 @app.get("/clients/{slug}", response_class=HTMLResponse)

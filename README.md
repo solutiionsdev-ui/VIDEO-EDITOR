@@ -153,6 +153,13 @@ Without credentials the worker writes `direction-request.md`, the job waits for 
 which beats have room under the face and says plainly what the renderer cannot do. The thread lives
 in `jobs/<job>/direction/`.
 
+**Something specific in one beat.** A comment or a direction can change everything about a beat's
+graphic, including its type: `set_graphic` swaps it for any other component of the style, checked
+against the style card (props, word limits, anchors). The `asset` component shows one of the client's
+own visuals — a screenshot, a chart, a photo — from `jobs/<job>/assets/` (upload under Notes &
+assets on the job page) or `clients/<slug>/assets/`. `beat 7: show chart.png` is enough; the planner
+also sees the list and may use them. Nothing that is not the client's goes into a reel.
+
 The status of a job is never stored: it is derived from the files in its folder (`renders/vN.mp4`,
 `vN-check.json`, `beats-request.md`, `approvals.json`, the queue), so a page can only show a state the
 folder is actually in. Everything listens on 127.0.0.1 only.

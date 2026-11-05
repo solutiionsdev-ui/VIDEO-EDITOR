@@ -263,6 +263,7 @@ def build_prompt(job: Job, profile: dict, style: dict, candidates: list[dict], c
         duration=fmt_clock(cuts["summary"]["seconds_out"]),
         note=job.note() or "(none)",
         broll=", ".join(broll) if broll else "(none)",
+        assets=", ".join(asset_files(job, profile)) or "(none)",
         script=cuts["script"],
         candidates="\n".join(lines),
     )
@@ -410,6 +411,7 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
         if m:
             white_max = int(m.group(1)) / 100
     broll_files = {p.name for p in job.optional_files("broll")}
+    assets = asset_files(job, profile)
     script_numbers = number_tokens(" ".join(c["text"] for c in candidates))
 
     expected = 1
@@ -465,6 +467,9 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
                         warnings.append(f"beat {i}: the number '{num}' in the graphic is not said in the video — check it")
                 if g["component"] == "logo-end-card" and i != len(plan["beats"]):
                     errors.append(f"beat {i}: logo-end-card is only for the last beat")
+                if g["component"] == "asset" and str(g["props"].get("file") or "") not in assets:
+                    errors.append(f"beat {i}: asset file '{g['props'].get('file')}' is not among the client's visuals "
+                                  f"(available: {', '.join(assets) or 'none'})")
         kept = []
         for hw in b.get("highlight_words", []) or []:
             if normalize(hw) and normalize(hw) in text_norm:
@@ -485,6 +490,68 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
     if total and with_graphic / total > 0.75:
         warnings.append(f"graphics on {with_graphic / total:.0%} of beats — probably too busy")
     return errors, warnings
+
+
+ASSET_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+def asset_files(job: Job, profile: dict) -> dict[str, Path]:
+    """Images the client supplied, by file name: jobs/<job>/assets/ first, then clients/<slug>/assets/."""
+    dirs = [job.path / "assets"]
+    if profile.get("_path"):
+        dirs.append(Path(profile["_path"]).parent / "assets")
+    out: dict[str, Path] = {}
+    for d in dirs:
+        if d.is_dir():
+            for f in sorted(d.iterdir()):
+                if f.is_file() and f.suffix.lower() in ASSET_EXT and not f.name.startswith("."):
+                    out.setdefault(f.name, f)
+    return out
+
+
+def validate_graphic(style: dict, layout: str, g: dict, assets: dict[str, Path], is_last: bool) -> list[str]:
+    """Problems with one graphic against the style: used by revise and the live editor (the planner has
+    its own pass over whole plans). Normalises props in place."""
+    comps = style.get("components", {})
+    layouts = style.get("layouts", {})
+    if not isinstance(g, dict):
+        return ["graphic must be an object"]
+    comp = comps.get(g.get("component"))
+    if comp is None:
+        return [f"unknown component '{g.get('component')}'; this style has: {', '.join(comps)}"]
+    props = g.get("props")
+    if props is None:
+        props = g["props"] = {}
+    if not isinstance(props, dict):
+        return ["props must be an object"]
+    errors: list[str] = []
+    known = set((comp.get("props") or {}).keys())
+    for k in list(props):
+        if known and k not in known:
+            errors.append(f"{g['component']} has no prop '{k}' (props: {', '.join(known)})")
+    allowed = layouts.get(layout, {}).get("graphic_anchors", [])
+    if allowed and g.get("anchor") not in allowed:
+        errors.append(f"anchor '{g.get('anchor')}' is not allowed for layout {layout} (use {', '.join(allowed)})")
+    texts = _graphic_texts(props, comp)
+    total_words = sum(len(t.split()) for t in texts)
+    if g["component"] == "ios-list":
+        items = props.get("items") or []
+        if not (2 <= len(items) <= 5):
+            errors.append(f"ios-list needs 2-5 items, has {len(items)}")
+        for it in items:
+            if len(str(it).split()) > 4:
+                errors.append(f"list item '{it}' is longer than 4 words")
+    elif total_words > 5 and g["component"] not in ("ios-card", "ios-message", "ios-suggested-edit"):
+        errors.append(f"graphic has {total_words} words; the limit is 5")
+    elif total_words > 12:
+        errors.append(f"graphic has {total_words} words; keep it under 12")
+    if g["component"] == "logo-end-card" and not is_last:
+        errors.append("logo-end-card is only for the last beat")
+    if g["component"] == "asset":
+        name = str(props.get("file") or "")
+        if name not in assets:
+            errors.append(f"asset file '{name}' is not among the client's visuals (available: {', '.join(assets) or 'none'})")
+    return errors
 
 
 def _graphic_texts(props: dict, comp: dict) -> list[str]:

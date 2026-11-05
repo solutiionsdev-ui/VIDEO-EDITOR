@@ -100,6 +100,12 @@
 .timer-icon { width: 30px; height: 30px; border-radius: 50%; border: 4px solid var(--white); position: relative; }
 .timer-icon::after { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 10px; background: var(--white); transform: translate(-50%, -90%); }
 
+/* client asset: screenshot, chart, photo */
+.w-asset { padding: 18px 18px 16px; max-width: 920px; }
+.asset { display: flex; flex-direction: column; align-items: center; }
+.asset-img { display: block; max-width: 880px; max-height: 720px; width: auto; height: auto; object-fit: contain; border-radius: 22px; opacity: 0; }
+.asset-cap { font-size: 30px; font-weight: 500; color: var(--grey); text-align: center; margin-top: 14px; opacity: 0; }
+
 /* end card */
 #endcard { background: radial-gradient(90% 70% at 50% 40%, color-mix(in srgb, var(--accent) 80%, #3a0d26) 0%, #2a0a1e 70%, #150412 100%); }
 .endcard-inner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px; text-align: center; }

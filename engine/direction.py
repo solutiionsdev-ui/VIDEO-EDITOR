@@ -74,7 +74,9 @@ RULE_KEYS = {
 }
 
 ARGS_HELP = ("caption_scale{factor}, set_layout{layout: face-full|white-card}, caption_style{style: normal|emphasis}, "
-             "set_text{text}, anchor{anchor: top|bottom}, shrink{factor}, set_highlight{words: [..]}; "
+             "set_text{text}, anchor{anchor: top|bottom}, shrink{factor}, set_highlight{words: [..]}, "
+             "set_graphic{component, props, anchor} (swap the beat's graphic for another component of the style, props as "
+             "the style card lists them; the asset component shows one of the client's own visuals by file name); "
              "remove_graphic, lock and unlock take none.")
 
 GUIDE = f"""You are the editor's AI colleague on a short-form reel. The Studiio editor writes to you the way they
@@ -211,6 +213,8 @@ def context_text(job: Job) -> str:
         return "\n".join(lines)
     lines.append(f"Style {beats.get('style')} · {fmt_time(beats.get('duration', 0))} · beats v{beats.get('version', 1)}"
                  f" · hook: {beats.get('hook', '')}")
+    visuals = beats_stage.asset_files(job, load_profile(job.state.get("client")))
+    lines.append("Client visuals available for the asset component: " + (", ".join(visuals) or "none"))
     lines += ["", "## The beats (id, time, layout, graphic, captions, what is said)"]
     for b in beats["beats"]:
         g = b.get("graphic")
@@ -328,6 +332,10 @@ def validate_changes(job: Job, changes: object) -> list[str]:
         return ["changes must be a list"]
     beats = _beats(job)
     ids = {b["id"]: b for b in beats["beats"]} if beats else {}
+    profile = load_profile(job.state.get("client"))
+    style = beats_stage.load_style(str((beats or {}).get("style") or get(profile, "style.name", "ios")))
+    assets = beats_stage.asset_files(job, profile)
+    last_id = beats["beats"][-1]["id"] if beats and beats["beats"] else None
     for i, ch in enumerate(changes):
         if not isinstance(ch, dict):
             errors.append(f"change {i + 1} is not an object")
@@ -347,6 +355,12 @@ def validate_changes(job: Job, changes: object) -> list[str]:
             ch["args"] = {}
         elif not isinstance(ch["args"], dict):
             errors.append(f"change {i + 1}: args must be an object")
+        elif ch.get("op") == "set_graphic" and b is not None:
+            allowed = style.get("layouts", {}).get(b["layout"], {}).get("graphic_anchors", [])
+            g = {"component": ch["args"].get("component"), "props": dict(ch["args"].get("props") or {}),
+                 "anchor": ch["args"].get("anchor") or (b.get("graphic") or {}).get("anchor") or (allowed[0] if allowed else "top")}
+            errors += [f"change {i + 1}: {e}" for e in beats_stage.validate_graphic(style, b["layout"], g, assets, is_last=(b["id"] == last_id))]
+            ch["args"] = g
         ch.setdefault("comment", "")
         ch.setdefault("rule", None)
     return errors

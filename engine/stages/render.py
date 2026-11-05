@@ -56,7 +56,7 @@ def run(job: Job, profile: dict, show: bool = False, workers: int | None = None,
     for i, beat in enumerate(beats):
         f0 = round(beat["start"] * FPS)
         f1 = total_frames if i == len(beats) - 1 else round(beats[i + 1]["start"] * FPS)
-        spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == len(beats) - 1))
+        spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == len(beats) - 1), job_dir=job.path)
         key = _key(spec, f0, f1, base_fp, renderer_fp)
         items.append({"id": beat["id"], "name": beat["name"], "f0": f0, "f1": f1, "spec": spec, "key": key,
                       "out": str(cache / f"{key}.mp4"), "base": str(base), "footage": True})

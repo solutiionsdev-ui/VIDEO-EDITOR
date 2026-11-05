@@ -259,6 +259,19 @@
       } };
   };
 
+  COMPONENTS["asset"] = (p) => {
+    const cap = p.caption ? `<div class="asset-cap">${esc(p.caption)}</div>` : "";
+    return { html: `<div class="asset"><img class="asset-img" src="${esc(p.src || "")}" alt="">${cap}</div>`,
+      animate: (el) => {
+        const img = el.querySelector(".asset-img"), c = el.querySelector(".asset-cap");
+        return (t) => {
+          const q = prog(t, 0.05, 0.45, easeOutBack);
+          img.style.opacity = clamp(q * 1.4, 0, 1); img.style.transform = `scale(${0.94 + 0.06 * q})`;
+          if (c) { const q2 = prog(t, 0.45, 0.3); c.style.opacity = q2; c.style.transform = `translateY(${(1 - q2) * 12}px)`; }
+        };
+      } };
+  };
+
   COMPONENTS["ios-toggle"] = (p) => {
     const on = (p.state || "on") === "on";
     return { html: `<div class="toggle-row"><span class="toggle-label">${esc(p.label || "")}</span>

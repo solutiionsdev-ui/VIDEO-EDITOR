@@ -205,7 +205,7 @@ def check_face_clear(job: Job, profile: dict, style: dict, beats: dict, cuts: di
     n = len(beats["beats"])
     with Renderer() as r:
         for i, b in enumerate(beats["beats"]):
-            spec = beat_spec(b, profile, style, is_first=(i == 0), is_last=(i == n - 1))
+            spec = beat_spec(b, profile, style, is_first=(i == 0), is_last=(i == n - 1), job_dir=job.path)
             r.setup(spec)
             times = sorted({round(x, 2) for x in np.arange(0.0, b["duration"], 0.2)} | {round(min(b["duration"] - 0.01, widget_in_time(spec) + 0.4), 2)})
             beat_worst = 0.0

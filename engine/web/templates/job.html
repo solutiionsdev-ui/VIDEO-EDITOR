@@ -29,7 +29,7 @@
 {% endif %}
 </div>
 <div class="panel">
-<div class="rtabs"><button type="button" class="on" data-tab="rev">Revisions</button><button type="button" data-tab="notes">Notes</button></div>
+<div class="rtabs"><button type="button" class="on" data-tab="rev">Revisions</button><button type="button" data-tab="notes">Notes &amp; assets</button></div>
 <div id="tab-rev">
 <p class="dim" style="margin:0 0 8px">{% if st.review and st.review.status == 'changes' and st.review.version == st.version %}Sent back: “{{ st.review.note }}”{% else %}Nothing to change yet. Pause the video where something is off and write what to change.{% endif %}</p>
 <form method="post" action="/jobs/{{ name }}/review" id="revise"><input type="hidden" name="action" value="changes"><input type="hidden" name="at" id="at"><input type="hidden" name="pin" id="pin" value="1">
@@ -42,6 +42,10 @@
 <div id="tab-notes" style="display:none">
 <label class="f">Notes for the edit</label><p style="margin:0">{{ meta.notes or '—' }}</p>
 {% if meta.due %}<label class="f">Due</label><p style="margin:0" class="mono">{{ meta.due }}</p>{% endif %}
+<label class="f">The client's visuals</label>
+{% if assets %}<div class="assets">{% for a in assets %}<div><a href="{{ a.url }}" target="_blank"><img src="{{ a.url }}" alt=""></a><div class="cap" title="{{ a.name }}">{{ a.name }}</div></div>{% endfor %}</div>{% else %}<p class="dim" style="margin:0">None yet.</p>{% endif %}
+<form method="post" action="/jobs/{{ name }}/assets" enctype="multipart/form-data" class="dropline"><input type="file" name="files" multiple accept="image/*"><button class="btn ghost">Add</button></form>
+<p class="dim" style="margin:6px 0 0;font-size:13px">Screenshots, charts, photos the client owns. Ask for one with <code>beat 7: show chart.png</code>, or tell Claude.</p>
 <label class="f">Links</label><p style="margin:0"><a class="open" href="/jobs/{{ name }}/files/log.txt">Engine log</a> · <a class="open" href="/jobs/{{ name }}/files/worker.log">Editor log</a>{% if delivered %} · <a class="open" href="/jobs/{{ name }}/files/{{ delivered }}">Final in delivery</a>{% endif %}</p>
 </div>
 </div>
@@ -101,6 +105,7 @@
       setTimeout(poll, box.dataset.live === '1' ? 1500 : 5000);
     };
     setTimeout(poll, 1500); }
+  if (location.hash === '#assets') { const nb = document.querySelector('.rtabs button[data-tab=notes]'); if (nb) setTimeout(() => nb.click(), 0); }
   document.querySelectorAll('.rtabs button').forEach(b => b.addEventListener('click', () => {
     document.querySelectorAll('.rtabs button').forEach(x => x.classList.toggle('on', x === b));
     document.getElementById('tab-rev').style.display = b.dataset.tab === 'rev' ? '' : 'none';

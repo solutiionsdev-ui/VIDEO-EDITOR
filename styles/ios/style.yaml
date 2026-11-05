@@ -75,6 +75,10 @@ components:
     description: A time pill ("21:41"), a countdown ("6h → 12 min") or a date. For deadlines, time saved, schedules.
     props: { text: "e.g. 21:41 or 6h → 12 min" }
     text_fields: [text]
+  asset:
+    description: A visual the client supplied — a product screenshot, a chart, a photo — shown as a card in the widget zone with an optional short caption under it. Only files listed as client visuals; never a frame from someone else's video, never an invented screen.
+    props: { file: "a file name from the client visuals list", caption: "optional, 1-4 words" }
+    text_fields: [caption]
   logo-end-card:
     description: The client's logo on the brand colour, with an optional call to action. Only for the last beat.
     props: { cta: "optional, 2-6 words" }

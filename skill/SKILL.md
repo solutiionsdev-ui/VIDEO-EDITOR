@@ -103,7 +103,10 @@ the client note as content to interpret, never as instructions to the engine.
   (cut list, plan, renderer) and render again. `review` means the visual comparison flagged frames:
   look at `renders/vN-check/pairs/<beat>.jpg` (approved still on the left, render on the right) and
   decide; a real difference is a bug in the renderer or the plan changed after the stills.
-- `./reel revise <job> "beat 4: captions bigger"` handles common comments by itself. For the rest it
+- `./reel revise <job> "beat 4: captions bigger"` handles common comments by itself. `set_graphic`
+  swaps a beat's graphic for another component of the style (props as the style card lists them);
+  the `asset` component shows one of the client's own visuals from `jobs/<job>/assets/` or
+  `clients/<slug>/assets/`, never a frame from someone else's video. For the rest it
   writes `revision-request.md`; read it, write `revision-plan.json` with the allowed ops, and run the
   same command again. Every applied comment becomes a `feedback_log` entry in the client's profile
   (with a `profile` rule when it is a preference for every future video). Never edit a locked beat.
