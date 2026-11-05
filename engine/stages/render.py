@@ -23,7 +23,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from ..job import Job, JobError, console, fmt_clock
 from ..profile import ROOT, get
 from ..render import compose
-from ..render.driver import Renderer, beat_spec, end_card_spec
+from ..render.driver import Renderer, beat_spec, end_card_spec, layout_kind, neighbours
 from .beats import load_style
 
 FPS = compose.FPS
@@ -56,13 +56,16 @@ def run(job: Job, profile: dict, show: bool = False, workers: int | None = None,
     for i, beat in enumerate(beats):
         f0 = round(beat["start"] * FPS)
         f1 = total_frames if i == len(beats) - 1 else round(beats[i + 1]["start"] * FPS)
-        spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == len(beats) - 1), job_dir=job.path)
+        prev, nxt = neighbours(beats, i, bool(beats_doc.get("end_card")))
+        spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == len(beats) - 1), job_dir=job.path,
+                         prev_layout=prev, next_layout=nxt)
         key = _key(spec, f0, f1, base_fp, renderer_fp)
         items.append({"id": beat["id"], "name": beat["name"], "f0": f0, "f1": f1, "spec": spec, "key": key,
-                      "out": str(cache / f"{key}.mp4"), "base": str(base), "footage": True})
+                      "out": str(cache / f"{key}.mp4"), "base": str(base),
+                      "footage": layout_kind(style, beat["layout"]) != "stage"})   # a stage beat shows no footage
     end_item = None
     if beats_doc.get("end_card"):
-        spec = end_card_spec(profile, style, END_CARD_SECONDS)
+        spec = end_card_spec(profile, style, END_CARD_SECONDS, prev_layout=beats[-1]["layout"])
         key = _key(spec, 0, round(END_CARD_SECONDS * FPS), "none", renderer_fp)
         end_item = {"id": "end", "name": "End card", "f0": 0, "f1": round(END_CARD_SECONDS * FPS), "spec": spec, "key": key,
                     "out": str(cache / f"{key}.mp4"), "base": None, "footage": False}
@@ -168,7 +171,7 @@ def _key(spec: dict, f0: int, f1: int, base_fp: str, renderer_fp: str) -> str:
 
 def _renderer_fingerprint(style: dict) -> str:
     h = hashlib.sha1()
-    for p in RENDERER_FILES + [ROOT / "styles" / style["name"] / "components.css"]:
+    for p in RENDERER_FILES + [ROOT / "styles" / style["name"] / "components.css", ROOT / "styles" / style["name"] / "components.js"]:
         if p.is_file():
             h.update(p.read_bytes())
     return h.hexdigest()[:12]

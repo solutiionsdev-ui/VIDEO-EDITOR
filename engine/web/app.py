@@ -164,9 +164,16 @@ def queue_page(request: Request):
 def new_job_form(request: Request, client: str = ""):
     clients = ops.list_clients()
     return page(request, "new.html", title="New job", crumb="content / new job", nav="new", clients=clients, error=None,
-                formats=_formats(clients),
+                formats=_formats(clients), styles=_style_choices(clients),
                 values={"client": client or (clients[0]["slug"] if clients else ""), "title": "", "footage_url": "",
-                        "notes": "", "due": ""})
+                        "notes": "", "due": "", "style": ""})
+
+
+def _style_choices(clients: list[dict]) -> dict:
+    """The styles each client may pick for a video, default first: {client slug: [{name, title}]}."""
+    titles = {s["name"]: s["title"] for s in ops.list_styles()}
+    return {c["slug"]: [{"name": n, "title": titles.get(n, n)} for n in ops.allowed_styles(c["profile"]) if n in titles]
+            for c in clients}
 
 
 def _formats(clients: list[dict]) -> dict:
@@ -181,14 +188,15 @@ def _formats(clients: list[dict]) -> dict:
 
 @app.post("/jobs/new")
 async def create_job(request: Request, client: str = Form(""), title: str = Form(""), footage_url: str = Form(""),
-                     notes: str = Form(""), due: str = Form(""), files: list[UploadFile] = File(default=[])):
+                     notes: str = Form(""), due: str = Form(""), style: str = Form(""),
+                     files: list[UploadFile] = File(default=[])):
     clients = ops.list_clients()
-    values = {"client": client, "title": title, "footage_url": footage_url.strip(), "notes": notes, "due": due}
+    values = {"client": client, "title": title, "footage_url": footage_url.strip(), "notes": notes, "due": due, "style": style}
     uploads = [f for f in files if f.filename]
 
     def fail(msg: str):
         return page(request, "new.html", title="New job", crumb="content / new job", nav="new", clients=clients,
-                    error=msg, values=values, formats=_formats(clients))
+                    error=msg, values=values, formats=_formats(clients), styles=_style_choices(clients))
 
     if not any(c["slug"] == client for c in clients):
         return fail("Pick a client.")
@@ -218,7 +226,9 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
     job.state["client"] = client
     footage = ({"type": "link", "url": values["footage_url"], "status": "pending"} if values["footage_url"]
                else {"type": "upload", "status": "fetched", "files": [f.filename for f in uploads]})
-    job.state["meta"] = {"title": title.strip(), "notes": notes.strip(), "footage": footage, "due": due.strip(),
+    allowed = [c["name"] for c in _style_choices(clients).get(client, [])]
+    chosen = style if style in allowed else (allowed[0] if allowed else "")
+    job.state["meta"] = {"title": title.strip(), "notes": notes.strip(), "footage": footage, "due": due.strip(), "style": chosen,
                          "created_by": "platform"}
     job.save_state()
     ops.enqueue(job.name, "edit", note=title.strip())

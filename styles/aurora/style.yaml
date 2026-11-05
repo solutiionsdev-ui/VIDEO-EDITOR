@@ -1,0 +1,113 @@
+# Aurora — the second style in the library.
+#
+# Look: a keynote teaser. A near-black stage with one living glow in the client's colours, small
+# regular-weight type that arrives word by word, frosted glass pills and panels with a bright rim.
+# The glow blooms to warm white at every change of layout: the bloom is the cut.
+#
+# This file is the contract between the beat planner (stage 7) and the renderer (stages 8/10):
+# the planner may only pick layouts and components listed here, with these props.
+# The look is in components.css; the component code and the glow are in components.js.
+
+name: aurora
+title: Aurora
+version: 1                 # bumped on every published change; jobs record the version they were planned with
+status: published          # draft | published | retired
+reference: "Keynote-style product teasers: black stage, one living glow, word-by-word type, frosted glass; studied from a reference reel, nothing from it is reused"
+
+planning: >
+  The hook and the payoff → statement, on a stage beat. A number → glass-stat. Something growing or
+  changing → glass-progress or before-after. A list of things → glass-list. A name, a tool or a label
+  worth pinning → glass-chip. One of the client's own visuals → asset. Use "stage" for the hook, a
+  section title, the one big number and the payoff: one beat at a time, never two in a row, and only
+  where the words can carry the frame without the face. Use "glass-card" for explanations, lists and
+  numbers, in runs of 2–4 consecutive beats.
+
+layouts:
+  face-full:
+    description: >
+      The footage fills the frame, darkened a little at the top and bottom so the type reads. One glass
+      widget at a time floats in the free zone above or below the face, never over the no-go box.
+      Captions sit in the lower third. The default layout.
+    graphic_anchors: [top, bottom]
+  stage:
+    kind: stage
+    description: >
+      No footage: a black stage with the glow in the client's colours and one statement or one widget
+      in the middle, while the voice carries on underneath. For the hook line, a section title, the one
+      big number, the payoff. The glow blooms into it and out of it.
+    zone: { top: 0.30, bottom: 0.66 }      # where the graphic sits, fractions of the frame
+    graphic_anchors: [center]
+    requires_graphic: true                 # nothing else is on screen
+    max_share: 0.25                        # of beats
+  glass-card:
+    kind: card
+    description: >
+      The footage sits in a rounded card with a bright glass rim on the stage; the widget sits below
+      it; captions under. For explanations, lists and numbers, in runs of 2–4 beats so the change
+      feels intentional.
+    footage_card: { x: 0.25, y: 0.065, w: 0.50, h: 0.40, radius: 56 }   # fractions of the frame; 9:16 footage, cover-fit; leaves room for the graphic below
+    bg_class: stage-bg
+    caption_theme: dark
+    graphic_anchors: [below-card]
+    max_share: 0.40
+
+components:
+  statement:
+    description: Small-weight centred text, 1-5 words, arriving word by word. One word or phrase may take the accent colour. The hook, a section title and the payoff are statements.
+    props: { text: "1-5 words", accent: "optional word or phrase from text" }
+    text_fields: [text]
+  glass-stat:
+    description: One big number inside a glass pill that grows as the number counts up, with a short label under it. For results, money, percentages, counts.
+    props: { value: "e.g. $800,000 or 40%", label: "2-4 words" }
+    text_fields: [value, label]
+  glass-progress:
+    description: A labelled glass bar that fills from one value to another while the number counts, e.g. "Hook rate 0% → 67%". For change, growth, work being done.
+    props: { label: "short label", from: "number 0-100", to: "number 0-100", unit: "%" }
+    text_fields: [label]
+  glass-list:
+    description: A frosted panel with an optional title and 2-5 short items that arrive one by one. For "three things", steps, a routine.
+    props: { title: "optional, 1-3 words", items: "list of 2-5 items, each 1-4 words" }
+    text_fields: [title, items]
+  glass-chip:
+    description: A glass tile next to a short label, like a name tag for a tool, a product or a topic. The tile can show one of the client's visuals (a logo, an icon); without one it shows a plain spark.
+    props: { label: "1-4 words", file: "optional, a file name from the client visuals list" }
+    text_fields: [label]
+  before-after:
+    description: Two lines — the old line struck through, the new line in the accent colour. For "was X, now Y".
+    props: { before: "2-6 words", after: "2-6 words" }
+    text_fields: [before, after]
+  asset:
+    description: A visual the client supplied — a product screenshot, a chart, a photo — in a glass frame, tilted a little in space, with an optional short caption under it. Only files listed as client visuals; never a frame from someone else's video, never an invented screen.
+    props: { file: "a file name from the client visuals list", caption: "optional, 1-4 words" }
+    text_fields: [caption]
+  logo-end-card:
+    description: The client's logo over the glow, with an optional call to action. Only for the last beat.
+    props: { cta: "optional, 2-6 words" }
+    text_fields: [cta]
+
+captions:
+  mode: word-by-word          # the words to come are dim, the said words are white, the active word glows
+  max_words_per_line: 4
+  max_lines: 2
+  position: lower-third        # face-full: lower third, always outside no_go; stage and glass-card: under the graphic
+  styles:
+    normal: client's caption font at medium weight, size from the profile
+    emphasis: same, 12% larger, used for the hook and the payoff lines only
+  arabic: right-to-left, English words kept in Latin script
+
+motion:
+  widget_in: "blur 14px → 0 with a fade and a 3% scale, 420 ms"
+  widget_out: "fade, 200 ms"
+  widget_hold: "1.5-4 s; at most one widget on screen at a time"
+  layout_switch: "flare: the glow blooms to warm white over the last 6 frames of a beat and recedes over the first 8 of the next"
+  first_beat: "no widget in the first 0.4 s"
+  glow: "four soft lights drifting slowly; their position depends on the time in the reel, so the stage keeps moving across beats"
+
+rules:
+  - At most 5 words of graphic text on screen at once (captions do not count).
+  - One widget at a time. Not every beat needs a graphic, except a stage beat, which has nothing else.
+  - Graphics must never cover the no-go box from face.json.
+  - Never invent product screens or interface text. Product UI only from the client's assets.
+  - The glow and the accents take the client's colours (brand.colours.primary and secondary). Type is white.
+  - Numbers, names and quotes in a graphic must come from what is said in that beat or the client's brief, never made up.
+  - No logos, wording or icons of other companies. The reference reel was studied for the look only.

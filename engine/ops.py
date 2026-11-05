@@ -487,6 +487,11 @@ def stats(rows: list[dict]) -> dict:
 
 # -- the style library ------------------------------------------------------------
 
+def allowed_styles(profile: dict) -> list[str]:
+    from .stages.beats import allowed_styles as _allowed
+    return _allowed(profile)
+
+
 STYLES_DIR = ROOT / "styles"
 
 
@@ -504,7 +509,11 @@ def list_styles() -> list[dict]:
         except yaml.YAMLError:
             continue
         name = str(st.get("name") or d.name)
-        used_by = [c["name"] for c in clients if str(((c["profile"].get("style") or {}).get("name")) or "ios") == name]
+        used_by = []      # every client that may use it; the client's default style is marked
+        for c in clients:
+            allowed = allowed_styles(c["profile"])
+            if name in allowed:
+                used_by.append(c["name"] + (" · default" if allowed[0] == name else ""))
         planned = sum(1 for j in jobs if j.has("beats.json") and str(read_json(j.path / "beats.json", {}).get("style")) == name)
         out.append({
             "name": name, "title": str(st.get("title") or name), "version": int(st.get("version") or 1),

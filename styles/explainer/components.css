@@ -1,0 +1,87 @@
+/* Explainer style — component looks. Loaded by renderer/page.html for every beat of an Explainer reel.
+   Sizes are in px for a 1080×1920 frame. Colours come from the client profile via --accent (brand
+   primary); --chip is the accent lifted a little so it holds on black, --tint a lighter cut. */
+
+#stage { --ink: #0b0b10; --paper: #ffffff; --chip: color-mix(in oklab, var(--accent) 84%, #fff); --tint: color-mix(in oklab, var(--accent) 50%, #fff);
+         background: var(--ink); --card-shadow: 0 0 0 1.5px rgba(10,10,30,.07), 0 36px 100px rgba(10,10,30,.26); }
+
+/* ---------- the two stages ---------- */
+.stage-dark { background: #050507; overflow: hidden; }
+.stage-light { background: var(--paper); overflow: hidden; }
+.xlight { position: absolute; left: 0; top: 0; border-radius: 50%; will-change: transform; }
+.stage-dark .xlight.a { width: 1500px; height: 1500px; background: radial-gradient(closest-side, color-mix(in srgb, var(--chip) 78%, transparent) 0%, color-mix(in srgb, var(--accent) 45%, transparent) 40%, transparent 72%); }
+.stage-dark .xlight.b { width: 900px; height: 900px; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 60%, transparent) 0%, transparent 70%); opacity: .35; }
+.stage-light .xlight.a { width: 1500px; height: 1500px; background: radial-gradient(closest-side, color-mix(in srgb, var(--chip) 46%, transparent) 0%, color-mix(in srgb, var(--tint) 30%, transparent) 42%, transparent 72%); }
+.stage-light .xlight.b { width: 900px; height: 900px; background: radial-gradient(closest-side, color-mix(in srgb, var(--tint) 34%, transparent) 0%, transparent 70%); }
+
+/* the wash at a change of layout */
+.xwash { position: absolute; inset: -4%; background: linear-gradient(158deg, var(--accent) 0%, var(--chip) 48%, var(--tint) 100%); opacity: 0; }
+
+/* ---------- footage ---------- */
+.kind-full #footage-wrap::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(5,5,7,.30) 0%, rgba(5,5,7,0) 20%, rgba(5,5,7,0) 58%, rgba(5,5,7,.55) 100%); }
+
+/* ---------- components ---------- */
+#widget { opacity: 0; }
+.widget { color: var(--ink); max-width: 940px; }
+
+/* a product screen as a floating panel */
+.xscreen { position: relative; width: 900px; border-radius: 30px; overflow: hidden; background: #fff;
+           box-shadow: 0 0 0 1.5px rgba(10,10,30,.08), 0 44px 110px rgba(10,10,30,.30); }
+.layout-stage-dark .xscreen { box-shadow: 0 0 0 1.5px rgba(255,255,255,.16), 0 0 120px color-mix(in srgb, var(--chip) 50%, transparent), 0 44px 110px rgba(0,0,0,.6); }
+.xshot { display: block; width: 100%; height: auto; will-change: transform; }
+.xcursor { position: absolute; left: 0; top: 0; width: 64px; height: 64px; margin: -6px 0 0 -8px; opacity: 0; filter: drop-shadow(0 6px 10px rgba(0,0,0,.35)); }
+.xclick { position: absolute; left: 0; top: 0; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 5px solid var(--chip); opacity: 0; }
+
+/* steps joined by arrows */
+.xflow { display: flex; flex-direction: column; align-items: center; }
+.xstep { background: var(--ink); color: #fff; border-radius: 32px; padding: 28px 64px; font-size: 68px; font-weight: 600; letter-spacing: -0.024em; line-height: 1.15; opacity: 0; min-width: 420px; text-align: center;
+         box-shadow: 0 22px 60px rgba(10,10,30,.22); }
+.layout-stage-dark .xstep { background: #fff; color: var(--ink); box-shadow: 0 22px 60px rgba(0,0,0,.5); }
+.xarrow { min-width: 104px; height: 104px; padding: 0 20px; border-radius: 28px; background: var(--chip); color: #fff; margin: 18px 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+          font-size: 26px; font-weight: 600; line-height: 1; opacity: 0; box-shadow: 0 14px 40px color-mix(in srgb, var(--chip) 45%, transparent); }
+.xarrow svg { width: 38px; height: 38px; stroke: #fff; fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.xarrow.rated svg { width: 30px; height: 30px; margin-bottom: 4px; }
+
+/* a notification */
+.xnote { display: flex; gap: 30px; align-items: center; background: #fff; color: var(--ink); border-radius: 38px; padding: 34px 44px; min-width: 880px;
+         box-shadow: 0 0 0 1.5px rgba(10,10,30,.06), 0 34px 90px rgba(10,10,30,.24); }
+.xnote-icon { width: 108px; height: 108px; border-radius: 30px; background: var(--chip); flex: none; display: flex; align-items: center; justify-content: center; }
+.xnote-icon svg { width: 46px; height: 46px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.xnote-title { font-size: 50px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
+.xnote-body { font-size: 42px; color: #4b4d5c; line-height: 1.3; margin-top: 2px; }
+
+/* one number on a solid tile */
+.xstat { background: var(--ink); color: #fff; border-radius: 36px; padding: 34px 64px 38px; text-align: center; min-width: 520px; box-shadow: 0 30px 80px rgba(10,10,30,.28); }
+.layout-stage-dark .xstat, .kind-full .xstat { background: #fff; color: var(--ink); }
+.xstat-num { font-size: 132px; font-weight: 700; letter-spacing: -0.035em; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.xstat-label { display: inline-block; margin-top: 18px; font-size: 34px; font-weight: 600; background: var(--chip); color: #fff; border-radius: 14px; padding: 6px 20px; letter-spacing: -0.01em; }
+
+/* a client visual that is not a screen */
+.w-asset { background: #fff; border-radius: 34px; padding: 16px 16px 14px; box-shadow: 0 0 0 1.5px rgba(10,10,30,.07), 0 36px 100px rgba(10,10,30,.26); max-width: 920px; }
+.asset { display: flex; flex-direction: column; align-items: center; }
+.asset-img { display: block; max-width: 880px; max-height: 720px; width: auto; height: auto; object-fit: contain; border-radius: 22px; opacity: 0; }
+.asset-cap { font-size: 30px; font-weight: 500; color: #5d6070; text-align: center; margin-top: 14px; opacity: 0; }
+
+/* end card: the logo inside a slow pulse */
+#endcard { background: #050507; overflow: hidden; }
+.xring { position: absolute; left: 50%; top: 44%; width: 400px; height: 400px; margin: -200px 0 0 -200px; border-radius: 50%; border: 3px solid var(--chip); opacity: 0; }
+.xcore { position: absolute; left: 50%; top: 44%; width: 1300px; height: 1300px; margin: -650px 0 0 -650px; border-radius: 50%;
+         background: radial-gradient(closest-side, color-mix(in srgb, var(--chip) 60%, transparent) 0%, color-mix(in srgb, var(--accent) 30%, transparent) 38%, transparent 70%); }
+.endcard-inner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px; text-align: center; padding-bottom: 230px; }
+.endcard-logo { width: 420px; max-height: 320px; object-fit: contain; opacity: 0; }
+.endcard-cta { background: var(--chip); color: #fff; font-size: 44px; font-weight: 600; letter-spacing: -0.015em; border-radius: 20px; padding: 12px 34px; opacity: 0; }
+.endcard-url { color: rgba(255,255,255,.7); font-size: 28px; letter-spacing: .16em; text-transform: uppercase; opacity: 0; }
+
+/* ---------- captions: the spoken words are the text on screen ---------- */
+.cap-line { display: none; font-size: var(--cap-size, 70px); font-weight: 600; line-height: 1.24; letter-spacing: -0.022em; }
+#captions.emphasis .cap-line { font-size: calc(var(--cap-size, 70px) * 1.12); }
+.kind-stage .cap-line { font-size: calc(var(--cap-size, 70px) * 1.38); line-height: 1.2; }
+.kind-stage #captions.emphasis .cap-line { font-size: calc(var(--cap-size, 70px) * 1.54); }
+.cw { display: inline-block; padding: 2px 9px; border-radius: 18px; opacity: 0; }       /* a word appears when it is said */
+.cw.said, .cw.active { opacity: 1; }
+.theme-dark .cw { color: #fff; }
+.theme-light .cw { color: var(--ink); }
+.kind-full .cw { text-shadow: 0 3px 20px rgba(0,0,0,.7), 0 0 2px rgba(0,0,0,.5); }
+.cw.hl.said, .cw.hl.active { background: var(--chip); color: #fff; padding: 2px 20px; margin: 0 5px; text-shadow: none; }
+.cw.active::after { content: ""; display: inline-block; width: 6px; height: .86em; margin-left: 10px; vertical-align: -0.08em; background: currentColor; border-radius: 2px; }   /* the typing cursor rides the word being said */

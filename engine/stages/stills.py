@@ -15,7 +15,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from ..job import Job, console
 from ..render import compose
-from ..render.driver import Renderer, beat_spec, end_card_spec, still_time
+from ..render.driver import Renderer, beat_spec, end_card_spec, layout_kind, neighbours, still_time
 from .beats import load_style
 
 OUTPUT = "stills/index.json"
@@ -42,9 +42,12 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
                                    TimeElapsedColumn(), console=console, transient=True) as progress:
         task = progress.add_task("s", total=n + (1 if beats.get("end_card") else 0))
         for i, beat in enumerate(beats["beats"]):
-            spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == n - 1), job_dir=job.path)
+            prev, nxt = neighbours(beats["beats"], i, bool(beats.get("end_card")))
+            spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == n - 1), job_dir=job.path,
+                             prev_layout=prev, next_layout=nxt)
             t = still_time(spec)
-            frame = compose.extract_frame(base, beat["start"] + t, tmp / f"frame-{beat['id']:02d}.jpg")
+            frame = None if layout_kind(style, beat["layout"]) == "stage" else \
+                compose.extract_frame(base, beat["start"] + t, tmp / f"frame-{beat['id']:02d}.jpg")
             out = stills_dir / f"beat-{beat['id']:02d}.jpg"
             r.setup(spec)
             r.frame(t, frame, out, quality=90)
@@ -52,7 +55,7 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
                           "file": f"stills/{out.name}"})
             progress.advance(task)
         if beats.get("end_card"):
-            spec = end_card_spec(profile, style, END_CARD_SECONDS)
+            spec = end_card_spec(profile, style, END_CARD_SECONDS, prev_layout=beats["beats"][-1]["layout"])
             out = stills_dir / "end-card.jpg"
             r.setup(spec)
             r.frame(1.2, None, out, quality=90)

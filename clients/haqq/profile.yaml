@@ -21,6 +21,10 @@ brand:
   tone: Confident, clear, lawyer-grade precision without the jargon. Poppins only.
 style:
   name: ios
+  allowed:
+  - ios
+  - aurora
+  - explainer
   tweaks:
   - captions 10% larger
   - white-card layout max 40% of beats

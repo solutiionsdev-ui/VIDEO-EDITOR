@@ -1,0 +1,125 @@
+# Explainer — the third style in the library.
+#
+# Look: a product explainer led by the voice. The spoken words are the big text on screen: they
+# build word by word as they are said, the key word in a solid chip of the client's colour. Two
+# stages: a dark one for the hook, the problem and the brand moments, a light one for anything that
+# shows the product. The product itself appears as real screens the client supplied, floating as
+# panels, with a slow push-in and a cursor. Small diagrams: steps joined by arrows, a notification.
+# The speaker is on screen for the opening line, a personal claim and the closing ask.
+#
+# This file is the contract between the beat planner (stage 7) and the renderer (stages 8/10).
+# The look is in components.css; the component code and the stage lights are in components.js.
+
+name: explainer
+title: Explainer
+version: 1                 # bumped on every published change; jobs record the version they were planned with
+status: published          # draft | published | retired
+reference: "Voice-led product explainers: type that follows the voice, highlight chips, real product screens with a push-in and a cursor, flow chips; studied from a reference reel, nothing from it is reused"
+
+planning: >
+  In this style the captions are the main graphic: on a stage the spoken words build big and centred,
+  so most stage beats need no component at all, only good highlight_words (the one or two words that
+  carry the line; they get the chip). Use "stage-dark" for the hook, the problem, a section turn and
+  the brand moment. Use "stage-light" whenever a component shows something: one of the client's
+  screens → screen (name where to push in with focus); steps, a funnel, a process → flow; a message,
+  a booking, a payment → note; one number → stat. Show the speaker with "face-full" for the opening
+  line, a personal claim and the closing ask, and with "frame" when a component should sit under the
+  face. Change layout often: a new layout every 1–3 beats keeps the pace of an explainer. Never
+  invent a screen: screen and asset only with a file from the client visuals list.
+
+layouts:
+  face-full:
+    description: >
+      The footage fills the frame. Captions sit in the lower third, the key words in chips. One
+      component may float above the face. For the opening line, a personal claim, the closing ask.
+    graphic_anchors: [top, bottom]
+  stage-dark:
+    kind: stage
+    description: >
+      No footage: a black stage with a soft light in the client's colour. The spoken words are the
+      big centred text. For the hook, the problem, a section turn, the brand moment.
+    bg_class: stage-dark
+    caption_theme: dark
+    zone: { top: 0.38, bottom: 0.78 }             # where a component sits, when there is one
+    captions: { top: 0.13, bottom: 0.34 }         # the words, above a component
+    captions_solo: { top: 0.30, bottom: 0.62 }    # the words alone, in the middle of the frame
+    graphic_anchors: [center]
+    max_share: 0.45
+  stage-light:
+    kind: stage
+    description: >
+      No footage: a white stage with a soft light of the client's colour in one corner. For anything
+      that shows the product or a diagram, with the spoken words above it.
+    bg_class: stage-light
+    caption_theme: light
+    zone: { top: 0.38, bottom: 0.78 }
+    captions: { top: 0.13, bottom: 0.34 }
+    captions_solo: { top: 0.30, bottom: 0.62 }
+    graphic_anchors: [center]
+    max_share: 0.50
+  frame:
+    kind: card
+    description: >
+      The footage sits in a rounded frame on the light stage, a component below it, captions under.
+      For a claim the speaker should be seen making while a component proves it.
+    footage_card: { x: 0.25, y: 0.065, w: 0.50, h: 0.40, radius: 44 }
+    bg_class: stage-light
+    caption_theme: light
+    captions_solo: { top: 0.50, bottom: 0.68 }    # with no component, the words sit right under the frame
+    graphic_anchors: [below-card]
+    max_share: 0.30
+
+components:
+  screen:
+    description: One of the client's own screens (a product screenshot) as a floating panel. The view pushes slowly towards one part of it while a cursor glides there and clicks. Only a file from the client visuals list; never an invented screen.
+    props: { file: "a file name from the client visuals list", focus: "optional: where to push in — top-left | top | top-right | left | center | right | bottom-left | bottom | bottom-right" }
+    text_fields: []
+  flow:
+    description: Two to four short steps joined by arrows, appearing one after the other. For a funnel, a process, a before-to-after. Each arrow may carry a rate when the rates are said.
+    props: { steps: "list of 2-4 steps, each 1-3 words", rates: "optional list, one per arrow, e.g. 6.5%" }
+    text_fields: [steps]
+  note:
+    description: A notification card — a title and one short line. For a message, a booking, a payment, a request.
+    props: { title: "1-3 words", body: "short line, up to 6 words" }
+    text_fields: [title, body]
+  stat:
+    description: One big number on a solid tile with a short label, counting up. For results, money, percentages, counts.
+    props: { value: "e.g. $800,000 or 40%", label: "2-4 words" }
+    text_fields: [value, label]
+  asset:
+    description: A visual the client supplied that is not a product screen — a chart, a photo — as a card, with an optional short caption. Only files listed as client visuals.
+    props: { file: "a file name from the client visuals list", caption: "optional, 1-4 words" }
+    text_fields: [caption]
+  logo-end-card:
+    description: The client's logo on the dark stage inside a slow pulse of rings, with an optional call to action in a chip. Only for the last beat.
+    props: { cta: "optional, 2-6 words" }
+    text_fields: [cta]
+
+captions:
+  mode: word-by-word          # each word appears as it is said; the word being said carries a typing cursor
+  max_words_per_line: 4
+  max_lines: 2
+  position: "stages: big and centred, above a component or alone in the middle; face-full and frame: lower third"
+  styles:
+    normal: client's caption font at semibold; on a stage about a third larger than the profile size
+    emphasis: same, 12% larger, used for the hook and the payoff lines only
+  highlight: the highlight words sit in a solid chip of the client's colour
+  arabic: right-to-left, English words kept in Latin script
+
+motion:
+  widget_in: "fade with a 26 px rise, 300 ms"
+  widget_out: "fade, 200 ms"
+  widget_hold: "1.5-4 s; at most one component on screen at a time"
+  layout_switch: "flare: a wash of the client's colour covers the frame at the cut and clears over the first 8 frames of the next beat"
+  first_beat: "no component in the first 0.4 s"
+  screen: "a push-in of about 25% towards the focus over the beat; the cursor arrives after 1.2 s and clicks"
+
+rules:
+  - The spoken words are the text on screen; a component adds proof, it never repeats the words.
+  - At most 5 words of graphic text on screen at once (captions and the words inside a client's screen do not count).
+  - One component at a time.
+  - Graphics must never cover the no-go box from face.json.
+  - Never invent product screens or interface text. Product UI only from the client's assets.
+  - The chips, the lights and the wash take the client's colour (brand.colours.primary). Type is white on dark, ink on light.
+  - Numbers, names and quotes in a graphic must come from what is said in that beat or the client's brief, never made up.
+  - No logos, wording or icons of other companies. The reference reel was studied for the look only.

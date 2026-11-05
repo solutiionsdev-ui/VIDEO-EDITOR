@@ -51,7 +51,7 @@ def run(job: Job, profile: dict, show: bool = False, planner: str = "auto", forc
     cuts = job.read_json("cuts.json")
     face = job.read_json("face.json") if job.has("face.json") else None
     takes = job.read_json("takes.json") if job.has("takes.json") else None
-    style = load_style(str(get(profile, "style.name", "ios")))
+    style = load_style(job_style(job, profile))
 
     candidates = build_candidates(cuts, face, takes, profile)
     job.write_json(CANDIDATES, {"duration": cuts["summary"]["seconds_out"], "candidates": candidates})
@@ -109,6 +109,31 @@ def run(job: Job, profile: dict, show: bool = False, planner: str = "auto", forc
 
 
 # -- style card --------------------------------------------------------------
+
+def allowed_styles(profile: dict) -> list[str]:
+    """The styles a client may use, default first: `style.allowed` in the profile, else just `style.name`."""
+    default = str(get(profile, "style.name", "ios"))
+    allowed = [str(s) for s in (get(profile, "style.allowed", []) or [])]
+    return [default] + [s for s in allowed if s != default]
+
+
+def job_style(job: Job, profile: dict) -> str:
+    """The style of this video: the one chosen for the job when the client may use it, else the client's default."""
+    chosen = str((job.state.get("meta") or {}).get("style") or "")
+    return chosen if chosen and chosen in allowed_styles(profile) else str(get(profile, "style.name", "ios"))
+
+
+def layout_shares(style: dict, profile: dict) -> dict[str, float]:
+    """The largest share of beats each layout may take (only layouts that have a limit)."""
+    shares = {name: float(l["max_share"]) for name, l in (style.get("layouts") or {}).items() if l.get("max_share") is not None}
+    if "white-card" in shares:      # the client profile may tighten or loosen the iOS card
+        shares["white-card"] = float(get(profile, "style.white_card_max", shares["white-card"]))
+        for tweak in get(profile, "style.tweaks", []) or []:
+            m = re.search(r"white-card layout max (\d+)%", str(tweak))
+            if m:
+                shares["white-card"] = int(m.group(1)) / 100
+    return shares
+
 
 def load_style(name: str) -> dict:
     path = STYLES_DIR / name / "style.yaml"
@@ -233,8 +258,8 @@ OUTPUT_SHAPE = """{
     {
       "name": "Hook",
       "from": 1, "to": 1,
-      "layout": "face-full | white-card",
-      "graphic": null  or  {"component": "ios-stat", "props": {"value": "$800,000", "label": "in sales", "trend": "up"}, "anchor": "top | bottom | below-card"},
+      "layout": "LAYOUTS",
+      "graphic": null  or  {"component": "a component from the style card", "props": {"as the style card lists them": "..."}, "anchor": "ANCHORS"},
       "caption_style": "normal | emphasis",
       "highlight_words": ["one", "word"],
       "broll": null  or  {"file": "name from the B-roll list", "note": "why"},
@@ -244,22 +269,38 @@ OUTPUT_SHAPE = """{
 }"""
 
 
+def output_shape(style: dict) -> str:
+    layouts = style.get("layouts") or {}
+    anchors = list(dict.fromkeys(a for l in layouts.values() for a in (l.get("graphic_anchors") or [])))
+    return OUTPUT_SHAPE.replace("LAYOUTS", " | ".join(layouts)).replace("ANCHORS", " | ".join(anchors) or "top")
+
+
+def layout_rules(style: dict, profile: dict) -> str:
+    layouts = style.get("layouts") or {}
+    shares = layout_shares(style, profile)
+    first = next(iter(layouts), "face-full")
+    lines = [f'"{first}" is the default.']
+    for name, l in layouts.items():
+        if name == first:
+            continue
+        limit = f" At most {shares[name]:.0%} of the beats." if name in shares else ""
+        need = " Such a beat always has a graphic." if l.get("requires_graphic") else ""
+        lines.append(f'"{name}": see the style card for when to use it.{limit}{need}')
+    return " ".join(lines)
+
+
 def build_prompt(job: Job, profile: dict, style: dict, candidates: list[dict], cuts: dict) -> str:
     template = PROMPT_FILE.read_text(encoding="utf-8")
-    white_max = float(get(profile, "style.white_card_max", style.get("layouts", {}).get("white-card", {}).get("max_share", 0.4)))
-    for tweak in get(profile, "style.tweaks", []) or []:
-        m = re.search(r"white-card layout max (\d+)%", str(tweak))
-        if m:
-            white_max = int(m.group(1)) / 100
     broll = [p.name for p in job.optional_files("broll")]
     lines = [f"{c['id']:>3} | {fmt_time(c['start'])}–{fmt_time(c['end'])} ({c['duration']:.1f}s) | {c['text']}" for c in candidates]
     return template.format(
         style_title=style.get("title", style.get("name")),
         style_card=style["_text"],
+        style_planning=str(style.get("planning") or "Use each component for what its description says.").strip(),
+        layout_rules=layout_rules(style, profile),
         client_summary=_client_summary(profile),
         client_rules=_client_rules(profile),
-        white_card_max=white_max,
-        output_shape=OUTPUT_SHAPE,
+        output_shape=output_shape(style),
         duration=fmt_clock(cuts["summary"]["seconds_out"]),
         note=job.note() or "(none)",
         broll=", ".join(broll) if broll else "(none)",
@@ -405,17 +446,13 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
     components = style.get("components", {})
     hard_max = float(get(profile, "beats.hard_max_s", 6.5))
     min_s, max_s = float(get(profile, "beats.min_s", 1.5)), float(get(profile, "beats.max_s", 4.0))
-    white_max = float(get(profile, "style.white_card_max", layouts.get("white-card", {}).get("max_share", 0.4)))
-    for tweak in get(profile, "style.tweaks", []) or []:
-        m = re.search(r"white-card layout max (\d+)%", str(tweak))
-        if m:
-            white_max = int(m.group(1)) / 100
+    shares = layout_shares(style, profile)
+    used: dict[str, int] = {}
     broll_files = {p.name for p in job.optional_files("broll")}
     assets = asset_files(job, profile)
     script_numbers = number_tokens(" ".join(c["text"] for c in candidates))
 
     expected = 1
-    white = 0
     with_graphic = 0
     for i, b in enumerate(plan["beats"], start=1):
         if b["from"] != expected:
@@ -437,9 +474,10 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
             warnings.append(f"beat {i}: {dur:.1f}s is outside the usual {min_s}-{max_s}s")
         if b["layout"] not in layouts:
             errors.append(f"beat {i}: unknown layout '{b['layout']}'")
-        if b["layout"] == "white-card":
-            white += 1
+        used[b["layout"]] = used.get(b["layout"], 0) + 1
         g = b.get("graphic")
+        if not g and layouts.get(b["layout"], {}).get("requires_graphic"):
+            errors.append(f"beat {i}: a {b['layout']} beat needs a graphic (nothing else is on screen)")
         if g:
             with_graphic += 1
             comp = components.get(g["component"])
@@ -451,10 +489,10 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
                     errors.append(f"beat {i}: anchor '{g['anchor']}' is not allowed for layout {b['layout']} (use {', '.join(allowed)})")
                 texts = _graphic_texts(g["props"], comp)
                 total_words = sum(len(t.split()) for t in texts)
-                if g["component"] == "ios-list":
+                if g["component"].endswith("-list"):
                     items = g["props"].get("items") or []
                     if not (2 <= len(items) <= 5):
-                        errors.append(f"beat {i}: ios-list needs 2-5 items, has {len(items)}")
+                        errors.append(f"beat {i}: {g['component']} needs 2-5 items, has {len(items)}")
                     for it in items:
                         if len(str(it).split()) > 4:
                             errors.append(f"beat {i}: list item '{it}' is longer than 4 words")
@@ -467,8 +505,8 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
                         warnings.append(f"beat {i}: the number '{num}' in the graphic is not said in the video — check it")
                 if g["component"] == "logo-end-card" and i != len(plan["beats"]):
                     errors.append(f"beat {i}: logo-end-card is only for the last beat")
-                if g["component"] == "asset" and str(g["props"].get("file") or "") not in assets:
-                    errors.append(f"beat {i}: asset file '{g['props'].get('file')}' is not among the client's visuals "
+                if (g["component"] == "asset" or g["props"].get("file")) and str(g["props"].get("file") or "") not in assets:
+                    errors.append(f"beat {i}: file '{g['props'].get('file')}' is not among the client's visuals "
                                   f"(available: {', '.join(assets) or 'none'})")
         kept = []
         for hw in b.get("highlight_words", []) or []:
@@ -485,8 +523,9 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
     if not errors and expected != n + 1:
         errors.append(f"beats stop at candidate {expected - 1}; all {n} candidates must be used")
     total = len(plan["beats"])
-    if total and white / total > white_max + 0.05:
-        warnings.append(f"white-card layout on {white / total:.0%} of beats; the profile allows {white_max:.0%}")
+    for lname, limit in shares.items():
+        if total and used.get(lname, 0) / total > limit + 0.05:
+            warnings.append(f"{lname} layout on {used.get(lname, 0) / total:.0%} of beats; the limit is {limit:.0%}")
     if total and with_graphic / total > 0.75:
         warnings.append(f"graphics on {with_graphic / total:.0%} of beats — probably too busy")
     return errors, warnings
@@ -534,10 +573,10 @@ def validate_graphic(style: dict, layout: str, g: dict, assets: dict[str, Path],
         errors.append(f"anchor '{g.get('anchor')}' is not allowed for layout {layout} (use {', '.join(allowed)})")
     texts = _graphic_texts(props, comp)
     total_words = sum(len(t.split()) for t in texts)
-    if g["component"] == "ios-list":
+    if g["component"].endswith("-list"):
         items = props.get("items") or []
         if not (2 <= len(items) <= 5):
-            errors.append(f"ios-list needs 2-5 items, has {len(items)}")
+            errors.append(f"{g['component']} needs 2-5 items, has {len(items)}")
         for it in items:
             if len(str(it).split()) > 4:
                 errors.append(f"list item '{it}' is longer than 4 words")
@@ -547,10 +586,10 @@ def validate_graphic(style: dict, layout: str, g: dict, assets: dict[str, Path],
         errors.append(f"graphic has {total_words} words; keep it under 12")
     if g["component"] == "logo-end-card" and not is_last:
         errors.append("logo-end-card is only for the last beat")
-    if g["component"] == "asset":
+    if g["component"] == "asset" or props.get("file"):      # a file named in a graphic must be the client's own
         name = str(props.get("file") or "")
         if name not in assets:
-            errors.append(f"asset file '{name}' is not among the client's visuals (available: {', '.join(assets) or 'none'})")
+            errors.append(f"file '{name}' is not among the client's visuals (available: {', '.join(assets) or 'none'})")
     return errors
 
 
@@ -669,7 +708,7 @@ def graphic_copy(g: dict | None) -> str:
         return ""
     p = g.get("props", {})
     comp = g.get("component")
-    if comp == "ios-list":
+    if str(comp).endswith("-list"):
         return (f"{p['title']}: " if p.get("title") else "") + " · ".join(str(x) for x in (p.get("items") or []))
     if comp == "ios-stat":
         return f"{p.get('value', '')} {p.get('label', '')}".strip()
@@ -714,7 +753,7 @@ def graphic_line(g: dict | None) -> str:
         return "—"
     p = g.get("props", {})
     comp = g.get("component", "")
-    if comp == "ios-list":
+    if str(comp).endswith("-list"):
         body = " · ".join(str(x) for x in (p.get("items") or []))
     elif comp == "ios-progress":
         body = f"{p.get('label', '')} {p.get('from', '')}{p.get('unit', '%')} → {p.get('to', '')}{p.get('unit', '%')}"

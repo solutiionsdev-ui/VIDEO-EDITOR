@@ -1,0 +1,106 @@
+/* Aurora style — component looks. Loaded by renderer/page.html for every beat of an Aurora reel.
+   Sizes are in px for a 1080×1920 frame. Colours come from the client profile via --accent (brand
+   primary) and --secondary; --tint is a lighter cut of the accent for type and glass. */
+
+#stage { --ink: #050307; --tint: color-mix(in oklab, var(--accent) 46%, #fff); --cream: #fff3e4;
+         --glass: linear-gradient(180deg, rgba(255,255,255,.17) 0%, rgba(255,255,255,.055) 55%, rgba(255,255,255,.09) 100%);
+         --rim: rgba(255,255,255,.42); background: var(--ink);
+         --card-shadow: 0 0 0 2px rgba(255,255,255,.26), 0 0 110px color-mix(in srgb, var(--accent) 55%, transparent), 0 50px 120px rgba(0,0,0,.6); }
+
+/* ---------- the stage and its glow ---------- */
+.stage-bg { background: var(--ink); overflow: hidden; }
+.glow { position: absolute; left: 0; top: 0; border-radius: 50%; will-change: transform; }
+.glow.g1 { width: 1700px; height: 1700px; background: radial-gradient(closest-side, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, transparent) 38%, transparent 72%); }
+.glow.g2 { width: 1150px; height: 1150px; background: radial-gradient(closest-side, var(--tint) 0%, color-mix(in srgb, var(--tint) 55%, transparent) 34%, transparent 70%); opacity: .82; }
+.glow.g3 { width: 560px; height: 560px; background: radial-gradient(closest-side, color-mix(in srgb, var(--cream) 80%, transparent) 0%, color-mix(in srgb, var(--cream) 34%, transparent) 42%, transparent 76%); opacity: .7; }
+.glow.g4 { width: 1300px; height: 1300px; background: radial-gradient(closest-side, color-mix(in srgb, var(--secondary) 85%, transparent) 0%, transparent 70%); opacity: .55; }
+.stage-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5,3,7,.80) 0%, rgba(5,3,7,.22) 40%, rgba(5,3,7,0) 70%); }
+
+/* the bloom at a change of layout */
+.flare { position: absolute; left: 50%; top: 68%; width: 1300px; height: 1300px; margin: -650px 0 0 -650px; border-radius: 50%;
+         background: radial-gradient(closest-side, var(--cream) 0%, var(--cream) 22%, var(--tint) 46%, color-mix(in srgb, var(--accent) 80%, transparent) 68%, transparent 100%); opacity: 0; }
+.flare-fill { position: absolute; inset: 0; background: var(--cream); opacity: 0; }
+
+/* ---------- footage ---------- */
+#footage-wrap::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(5,3,7,.58) 0%, rgba(5,3,7,0) 24%, rgba(5,3,7,0) 56%, rgba(5,3,7,.66) 100%); }
+.kind-card #footage-wrap::after { background: linear-gradient(180deg, rgba(5,3,7,0) 62%, rgba(5,3,7,.34) 100%); }
+
+/* ---------- glass ---------- */
+#widget { opacity: 0; }
+.widget { background: var(--glass); color: #fff; border-radius: 46px; padding: 36px 48px; border: 1.5px solid var(--rim); max-width: 900px;
+          box-shadow: 0 1px 0 rgba(255,255,255,.38) inset, 0 -1px 0 rgba(255,255,255,.06) inset, 0 34px 90px rgba(0,0,0,.42);
+          -webkit-backdrop-filter: blur(22px) saturate(1.35); backdrop-filter: blur(22px) saturate(1.35); }
+
+/* statement: no glass, only type */
+.w-statement { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0 56px; max-width: 980px; text-align: center; }
+.statement { font-size: 108px; font-weight: 400; line-height: 1.1; letter-spacing: -0.03em; color: #fff; }
+.statement .sw { display: inline-block; opacity: 0; will-change: transform, opacity, filter; }
+.statement .sw.acc { color: var(--tint); }
+.kind-full .statement { font-size: 84px; text-shadow: 0 4px 34px rgba(0,0,0,.6); }
+.kind-card .statement { font-size: 72px; }
+
+/* a number in a pill that grows */
+.w-glass-stat, .w-glass-progress, .w-glass-chip { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0; }
+.gstat { width: 860px; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+.gpill { position: relative; height: 176px; border-radius: 88px; background: var(--glass); border: 1.5px solid var(--rim); overflow: hidden;
+         box-shadow: 0 1px 0 rgba(255,255,255,.42) inset, 0 30px 80px rgba(0,0,0,.4); -webkit-backdrop-filter: blur(22px) saturate(1.35); backdrop-filter: blur(22px) saturate(1.35); }
+.gstat .gpill { align-self: center; display: flex; align-items: center; justify-content: flex-end; padding: 0 54px; min-width: 200px;
+                box-shadow: 0 1px 0 rgba(255,255,255,.42) inset, 0 0 90px color-mix(in srgb, var(--accent) 60%, transparent), 0 30px 80px rgba(0,0,0,.4); }
+.gnum { font-size: 112px; font-weight: 400; letter-spacing: -0.035em; line-height: 1; font-variant-numeric: tabular-nums; color: #fff; white-space: nowrap; }
+.glabel { font-size: 38px; font-weight: 400; color: rgba(255,255,255,.78); letter-spacing: -0.01em; opacity: 0; }
+
+/* progress */
+.gprog { width: 860px; display: flex; flex-direction: column; gap: 20px; }
+.gprog-label { font-size: 38px; font-weight: 400; color: rgba(255,255,255,.82); letter-spacing: -0.01em; }
+.gprog .gpill { height: 132px; border-radius: 66px; }
+.gfill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 66px;
+         background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 80%, transparent), var(--tint) 70%, var(--cream)); opacity: .92; }
+.gprog .gnum { position: absolute; top: 50%; right: 44px; transform: translateY(-50%); font-size: 78px; }
+
+/* list */
+.glist { min-width: 720px; }
+.kind-card .w-glass-list { padding: 22px 40px; }
+.kind-card .gitem { padding: 10px 0; font-size: 44px; }
+.kind-card .glist-title { margin-bottom: 8px; }
+.glist-title { font-size: 26px; letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.6); font-weight: 500; margin-bottom: 16px; }
+.gitem { display: flex; align-items: center; gap: 22px; padding: 15px 0; border-bottom: 1.5px solid rgba(255,255,255,.14); font-size: 42px; font-weight: 400; letter-spacing: -0.012em; opacity: 0; }
+.gitem:last-child { border-bottom: 0; }
+.gmk { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--tint); box-shadow: 0 0 22px var(--tint); }
+
+/* a tile and a label */
+.gchip { display: inline-flex; align-items: center; gap: 28px; }
+.gtile { width: 148px; height: 148px; border-radius: 40px; background: var(--glass); border: 1.5px solid var(--rim); display: flex; align-items: center; justify-content: center; overflow: hidden;
+         box-shadow: 0 1px 0 rgba(255,255,255,.45) inset, 0 0 60px color-mix(in srgb, var(--tint) 45%, transparent), 0 24px 60px rgba(0,0,0,.4);
+         -webkit-backdrop-filter: blur(22px) saturate(1.35); backdrop-filter: blur(22px) saturate(1.35); }
+.gtile img { width: 70%; height: 70%; object-fit: contain; }
+.gtile svg { width: 58%; height: 58%; stroke: #fff; fill: none; stroke-width: 1.6; }
+.gchip-label { font-size: 72px; font-weight: 400; letter-spacing: -0.025em; color: #fff; text-shadow: 0 4px 30px rgba(0,0,0,.5); }
+
+/* before / after */
+.ba { min-width: 760px; }
+.ba-before { position: relative; display: inline-block; font-size: 44px; color: rgba(255,255,255,.6); font-weight: 400; }
+.ba-strike { position: absolute; left: 0; top: 52%; height: 4px; width: 0; background: rgba(255,255,255,.75); border-radius: 2px; }
+.ba-after { font-size: 58px; font-weight: 500; color: var(--tint); margin-top: 14px; opacity: 0; letter-spacing: -0.02em; }
+
+/* the client's own visual, in a glass frame */
+.w-asset { padding: 16px 16px 14px; max-width: 920px; border-radius: 42px; }
+.asset { display: flex; flex-direction: column; align-items: center; }
+.asset-img { display: block; max-width: 880px; max-height: 700px; width: auto; height: auto; object-fit: contain; border-radius: 28px; opacity: 0; }
+.asset-cap { font-size: 30px; font-weight: 400; color: rgba(255,255,255,.76); text-align: center; margin-top: 14px; opacity: 0; }
+
+/* end card */
+#endcard { background: radial-gradient(60% 34% at 50% 78%, var(--cream) 0%, var(--tint) 26%, color-mix(in srgb, var(--accent) 80%, transparent) 54%, transparent 100%),
+                       radial-gradient(90% 60% at 50% 86%, var(--accent) 0%, transparent 70%), var(--ink); }
+.endcard-inner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px; text-align: center; padding-bottom: 220px; }
+.endcard-logo { width: 420px; max-height: 320px; object-fit: contain; opacity: 0; }
+.endcard-cta { color: #fff; font-size: 46px; font-weight: 400; letter-spacing: -0.015em; opacity: 0; }
+.endcard-url { color: rgba(255,255,255,.7); font-size: 28px; letter-spacing: .16em; text-transform: uppercase; opacity: 0; }
+
+/* ---------- captions: the words to come are dim, the said words white, the active word glows ---------- */
+.cap-line { display: none; font-size: var(--cap-size, 70px); font-weight: 500; line-height: 1.25; letter-spacing: -0.012em; }
+#captions.emphasis .cap-line { font-size: calc(var(--cap-size, 70px) * 1.12); }
+.cw { display: inline-block; padding: 2px 8px; color: rgba(255,255,255,.58); text-shadow: 0 2px 18px rgba(0,0,0,.75), 0 0 2px rgba(0,0,0,.5); }
+.cw.said { color: rgba(255,255,255,.94); }
+.cw.active { color: #fff; text-shadow: 0 0 36px color-mix(in srgb, var(--tint) 85%, transparent), 0 2px 16px rgba(0,0,0,.55); }
+.cw.hl.said, .cw.hl.active { color: var(--tint); }

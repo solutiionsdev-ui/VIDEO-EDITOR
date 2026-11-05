@@ -7,15 +7,23 @@
 <div class="row3"><div><label class="f">Client</label><select name="client" id="client">{% for c in clients %}<option value="{{ c.slug }}" {{ 'selected' if c.slug == values.client else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
 <div><label class="f">Due</label><input type="date" name="due" value="{{ values.due }}"></div>
 <div><label class="f">Type</label><input type="text" value="Main edit · talking head" disabled></div></div>
+<div id="stylebox"><label class="f">Style for this video</label><select name="style" id="style" data-current="{{ values.style }}"></select>
+<p class="dim" style="margin:6px 0 0;font-size:13px">One look for the whole reel. The first is the client's usual style; the brand colours, font and logo stay the same in every style. <a href="/styles">See the styles</a>.</p></div>
 <label class="f">Format</label><div class="chips" style="margin-top:0" id="fmt">{% for slug, text in formats.items() %}<span class="chip static" data-client="{{ slug }}" {% if slug != values.client %}style="display:none"{% endif %}>{{ text }}</span>{% endfor %}</div>
 <div class="label" style="margin-top:22px">Footage and video</div>
 <div class="row"><div><label class="f">Raw footage</label><input type="file" name="files" multiple accept="video/*,.mov,.mp4,.m4v,.mkv,.webm,.mts"></div>
 <div><label class="f">Footage link</label><input type="url" name="footage_url" value="{{ values.footage_url }}" placeholder="https://drive.google.com/file/d/…"></div></div>
 <p class="dim" style="margin:8px 0 0">A Google Drive link works when the file is shared with anyone with the link. One of the two is enough.</p>
 <label class="f">Notes for the edit</label><textarea name="notes" placeholder="Anything the editor should know: what to keep, what to cut, the one message of the video.">{{ values.notes }}</textarea>
-<div class="actions"><button class="btn">Add to the queue</button><a class="btn ghost" href="/">Cancel</a><span class="dim">Style, captions and rules come from the <a href="/clients">client profile</a>.</span></div>
+<div class="actions"><button class="btn">Add to the queue</button><a class="btn ghost" href="/">Cancel</a><span class="dim">Captions, colours and rules come from the <a href="/clients">client profile</a>.</span></div>
 </form>
 {% endblock %}
 {% block scripts %}<script>
-(function(){ const s=document.getElementById('client'); if(!s) return; s.addEventListener('change',()=>{ document.querySelectorAll('#fmt .chip').forEach(c=>c.style.display=c.dataset.client===s.value?'':'none'); }); })();
+(function(){ const s=document.getElementById('client'); if(!s) return;
+  const STYLES = {{ styles|tojson }}, box = document.getElementById('stylebox'), sel = document.getElementById('style');
+  function fill(){ const list = STYLES[s.value] || []; sel.innerHTML = list.map((x, i) => `<option value="${x.name}">${x.title}${i === 0 ? ' (the client\'s usual)' : ''}</option>`).join('');
+    if (sel.dataset.current && list.some(x => x.name === sel.dataset.current)) sel.value = sel.dataset.current;
+    box.style.display = list.length > 1 ? '' : 'none'; }   // one style: nothing to choose
+  fill();
+  s.addEventListener('change',()=>{ sel.dataset.current = ''; fill(); document.querySelectorAll('#fmt .chip').forEach(c=>c.style.display=c.dataset.client===s.value?'':'none'); }); })();
 </script>{% endblock %}

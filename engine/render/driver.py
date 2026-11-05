@@ -127,11 +127,27 @@ def asset_src(props: dict, job_dir: Path | None, profile: dict) -> dict:
     return {"src": "", "stamp": "missing"}
 
 
-def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last: bool, job_dir: Path | None = None) -> dict:
+def layout_kind(style: dict, layout: str) -> str:
+    """How a layout uses the footage: "full" frame, in a "card", or not at all ("stage")."""
+    L = (style.get("layouts") or {}).get(layout) or {}
+    return str(L.get("kind") or ("card" if L.get("footage_card") else "full"))
+
+
+def neighbours(beats: list[dict], i: int, end_card: bool = False) -> tuple[str | None, str | None]:
+    """The layouts just before and just after beat i, for transitions that depend on a layout change."""
+    prev = beats[i - 1]["layout"] if i > 0 else None
+    nxt = beats[i + 1]["layout"] if i + 1 < len(beats) else ("logo-end-card" if end_card else None)
+    return prev, nxt
+
+
+def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last: bool, job_dir: Path | None = None,
+              prev_layout: str | None = None, next_layout: str | None = None) -> dict:
     """Everything the page needs to render one beat, with times relative to the beat start."""
     caps = profile.get("captions", {}) or {}
+    style_js = STYLES_DIR / style["name"] / "components.js"
+    flare = str((style.get("motion") or {}).get("layout_switch") or "").startswith("flare")
     graphic = beat.get("graphic")
-    if graphic and graphic.get("component") == "asset":
+    if graphic and (graphic.get("props") or {}).get("file"):     # one of the client's own visuals, by file name
         props = graphic.get("props") or {}
         graphic = {**graphic, "props": {**props, **asset_src(props, job_dir, profile)}}
     words: list[dict] = []
@@ -145,8 +161,9 @@ def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last
             words.append(token)
     return {
         "width": WIDTH, "height": HEIGHT, "fps": FPS,
-        "style": {"layouts": style.get("layouts", {}), "motion_first_beat_delay": 0.4},
+        "style": {"name": style["name"], "layouts": style.get("layouts", {}), "motion_first_beat_delay": 0.4},
         "style_css": (STYLES_DIR / style["name"] / "components.css").resolve().as_uri(),
+        "style_js": style_js.resolve().as_uri() if style_js.is_file() else None,
         "brand": brand_spec(profile),
         "captions": {
             "size_px": int(caps.get("size_px", 64)),
@@ -161,15 +178,19 @@ def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last
             "duration": float(beat["duration"]), "words": words, "no_go": beat.get("no_go"),
             "is_first": is_first, "is_last": is_last, "hold_widget": False,
             "render": beat.get("render") or {},     # quality-check overrides: anchor, shrink
+            "t0": round(float(beat.get("start") or 0.0), 3),   # where the beat sits in the reel, so a style's background moves on across beats
+            "flare_in": bool(flare and prev_layout is not None and prev_layout != beat["layout"]),
+            "flare_out": bool(flare and next_layout is not None and next_layout != beat["layout"]),
         },
     }
 
 
-def end_card_spec(profile: dict, style: dict, duration: float) -> dict:
+def end_card_spec(profile: dict, style: dict, duration: float, prev_layout: str | None = None) -> dict:
     cta = str(profile.get("format", {}).get("cta") or "")
     spec = beat_spec({"id": 0, "layout": "logo-end-card", "graphic": {"component": "logo-end-card", "props": {"cta": cta}, "anchor": "top"},
                       "start": 0.0, "duration": duration, "words": [], "no_go": None,
-                      "caption": {"style": "normal", "highlight": []}}, profile, style, is_first=False, is_last=True)
+                      "caption": {"style": "normal", "highlight": []}}, profile, style, is_first=False, is_last=True,
+                     prev_layout=prev_layout)
     return spec
 
 

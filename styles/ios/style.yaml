@@ -15,6 +15,12 @@ version: 1                 # bumped on every published change; jobs record the v
 status: published          # draft | published | retired
 reference: "HAQQ #1 reel: time pills, chat window, term-sheet card, suggested-edit card with Accept/Dismiss, email card, phone mockup; Poppins; wine/navy accents on soft white"
 
+planning: >
+  A number → ios-stat, a list of things → ios-list, something changing → ios-progress or before-after,
+  a message or request → ios-notification or ios-message, a decision → ios-toggle, a schedule or
+  deadline → ios-timer, an improvement → ios-suggested-edit. Use "white-card" for explanations, lists
+  and numbers, in runs of 2–4 consecutive beats.
+
 layouts:
   face-full:
     description: >

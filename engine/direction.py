@@ -40,6 +40,7 @@ from pathlib import Path
 from . import ops
 from .job import Job, JobError, fmt_time
 from .media import probe, run_ffmpeg
+from .render.driver import layout_kind
 from .profile import ROOT, get, load_profile
 from .stages import beats as beats_stage
 from .stages import revise as revise_stage
@@ -73,7 +74,7 @@ RULE_KEYS = {
     "music.ducking_db": ("num", (-30, 0)),
 }
 
-ARGS_HELP = ("caption_scale{factor}, set_layout{layout: face-full|white-card}, caption_style{style: normal|emphasis}, "
+ARGS_HELP = ("caption_scale{factor}, set_layout{layout: a layout from the style card}, caption_style{style: normal|emphasis}, "
              "set_text{text}, anchor{anchor: top|bottom}, shrink{factor}, set_highlight{words: [..]}, "
              "set_graphic{component, props, anchor} (swap the beat's graphic for another component of the style, props as "
              "the style card lists them; the asset component shows one of the client's own visuals by file name); "
@@ -219,6 +220,7 @@ def context_text(job: Job) -> str:
     if not beats:
         lines.append("No beat plan yet: the beats stage has not run, so there is nothing to change on a beat level.")
         return "\n".join(lines)
+    style = beats_stage.load_style(str(beats.get("style") or "ios"))
     lines.append(f"Style {beats.get('style')} · {fmt_time(beats.get('duration', 0))} · beats v{beats.get('version', 1)}"
                  f" · hook: {beats.get('hook', '')}")
     visuals = beats_stage.asset_files(job, load_profile(job.state.get("client")))
@@ -229,7 +231,7 @@ def context_text(job: Job) -> str:
         gdesc = beats_stage.graphic_line(g) if g else "no graphic"
         r = b.get("render") or {}
         extras = [k + "=" + str(v) for k, v in r.items()]
-        room = room_below(b) if b.get("layout") != "white-card" else None
+        room = room_below(b) if layout_kind(style, b.get("layout")) == "full" else None
         where = ("" if room is None else " · room below the face" if room >= 0.12
                  else f" · no room below the face (it reaches {round((b.get('no_go') or [0, 0, 0, 0.65])[3] * 100)}% down)")
         lines.append(f"- beat {b['id']} ({fmt_time(b['start'])}–{fmt_time(b['end'])}) {b.get('layout')} · {gdesc}"
@@ -365,7 +367,7 @@ def validate_changes(job: Job, changes: object) -> list[str]:
         elif b.get("locked") and ch.get("op") != "unlock":
             errors.append(f"change {i + 1}: beat {b['id']} is locked")
         elif ch.get("op") == "anchor" and (ch.get("args") or {}).get("anchor") == "bottom" \
-                and b.get("layout") != "white-card" and room_below(b) < 0.12:
+                and layout_kind(style, b.get("layout")) == "full" and room_below(b) < 0.12:
             errors.append(f"change {i + 1}: no room below the face on beat {b['id']}, the renderer would keep the card "
                           f"at the top; drop this change and say so in text")
         if ch.get("args") is None:

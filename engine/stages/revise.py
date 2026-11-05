@@ -158,8 +158,10 @@ def interpret(p: dict, beats: dict, profile: dict, assets: dict | None = None) -
         return each("caption_scale", f"captions 11% smaller on beat {p['beat']}", factor=0.89)
     if p["beat"] and re.search(r"\b(no|remove|drop|delete|kill|lose)\b.*\b(graphic|widget|stat|card|list|headline|notification|toggle|bubble)", s):
         return each("remove_graphic", "no graphic on this beat")
-    if p["beat"] and re.search(r"white[- ]card", s):
-        return each("set_layout", "white-card layout here", layout="white-card")
+    if p["beat"]:      # "white card here", "stage", "glass card": a layout of this reel's style, named
+        for lname in (load_style(str(beats.get("style") or "ios")).get("layouts") or {}):
+            if lname != "face-full" and re.search(rf"\b{lname.replace('-', '[- ]?')}\b", s):
+                return each("set_layout", f"{lname} layout here", layout=lname)
     if p["beat"] and re.search(r"full[- ]?frame|face[- ]full|no card|full face", s):
         return each("set_layout", "face-full layout here", layout="face-full")
     m = re.search(r"(?:say|text|read|change|replace|should be|make it)\D*?[\"'“‘](.+?)[\"'”’]", p["body"], re.I)
@@ -217,9 +219,18 @@ def apply_changes(job: Job, beats: dict, profile: dict, changes: list[dict]) -> 
         elif op == "remove_graphic":
             b["graphic"] = None
         elif op == "set_layout":
+            target = (style.get("layouts") or {}).get(args.get("layout"))
+            if target is None:
+                skipped.append(f"beat {b['id']}: this style has no layout '{args.get('layout')}' (it has: {', '.join(style.get('layouts') or {})})")
+                continue
+            if target.get("requires_graphic") and not b.get("graphic"):
+                skipped.append(f"beat {b['id']}: a {args['layout']} beat needs a graphic (nothing else is on screen)")
+                continue
             b["layout"] = args["layout"]
-            if b.get("graphic"):
-                b["graphic"]["anchor"] = "below-card" if args["layout"] == "white-card" else "top"
+            allowed = target.get("graphic_anchors") or ["top"]
+            if b.get("graphic") and b["graphic"].get("anchor") not in allowed:
+                b["graphic"]["anchor"] = allowed[0]
+            r.pop("anchor", None)
         elif op == "caption_style":
             b["caption"]["style"] = args["style"]
         elif op == "set_text":
@@ -321,7 +332,7 @@ def _request(job: Job, beats: dict, profile: dict, unresolved: list[dict]) -> st
              "Turn each comment below into changes. Reply by writing `revision-plan.json` next to this file:", "",
              "```json", '{"changes": [{"beat": 4, "op": "set_text", "args": {"text": "New words"}, "comment": "<the comment>", "rule": "<one line the profile learns>"}]}', "```", "",
              "Allowed ops and args: " + "; ".join(f"{k} ({v})" for k, v in OPS.items()),
-             "Args: caption_scale{factor}, set_layout{layout: face-full|white-card}, caption_style{style}, set_text{text}, "
+             "Args: caption_scale{factor}, set_layout{layout: a layout of the style}, caption_style{style}, set_text{text}, "
              "anchor{anchor: top|bottom}, shrink{factor}, set_highlight{words: [..]}, "
              "set_graphic{component, props, anchor} (another component of the style, props as the style card lists them; "
              "the asset component shows one of the client's visuals: " + (", ".join(asset_files(job, profile)) or "none") + "); "

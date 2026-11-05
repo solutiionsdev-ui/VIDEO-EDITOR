@@ -164,6 +164,18 @@ the request file for Claude Code. Every comment gets its own answer under the be
 and a conversation redraws only when its content changes. Versions, notes and the client's visuals
 sit in a closed section at the bottom.
 
+**Styles.** A style is a folder in `styles/`: `style.yaml` (the contract: layouts, components, their
+props, planning advice), `components.css` (the look) and, when it needs its own, `components.js`
+(component code, a background, a transition). Three exist: **iOS** (white cards, the client's accent),
+**Aurora** (a black stage with a living glow in the client's colours, word-by-word type, frosted
+glass; the glow blooms at every change of layout) and **Explainer** (the spoken words are the big
+text on a dark or a light stage, key words in chips; the client's own product screens as panels with
+a push-in and a cursor; steps joined by arrows). A layout is one of three kinds: the footage fills
+the frame, sits in a card, or is not shown at all (a `stage` beat, where the voice carries on under
+one statement or number). A client's profile names its usual style and may list others it can use
+(`style.allowed`); **New job** then offers the choice, one style per reel. The brand colours, font and
+logo stay the client's in every style. The Styles page shows both with real frames.
+
 **Something specific in one beat.** A comment or a direction can change everything about a beat's
 graphic, including its type: `set_graphic` swaps it for any other component of the style, checked
 against the style card (props, word limits, anchors). The `asset` component shows one of the client's

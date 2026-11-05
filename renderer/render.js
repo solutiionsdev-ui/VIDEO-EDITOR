@@ -16,6 +16,22 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const norm = (w) => String(w).toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "");
 
+  // A style can bring its own code: styles/<name>/components.js calls STUDIIO.style(name, {...}) with
+  //   components   {name: (props, spec) => ({html, animate})}   used before the built-in ones
+  //   setup(ctx)   build the style's own background and effects for this beat
+  //   frame(ctx)   set them at time ctx.t (ctx.T is the time since the start of the reel)
+  //   widget(el, m) place the widget instead of the default slide-up (m: enter 0..1, opacity, fit)
+  const STYLES = {};
+  window.STUDIIO = {
+    style(name, def) { STYLES[name] = def || {}; },
+    util: { clamp, easeOutCubic, easeOutBack, prog, esc, norm },
+  };
+  const ctxOf = (t) => {
+    const b = S.spec.beat;
+    return { spec: S.spec, geo: S.geo, t, T: (b.t0 || 0) + t, duration: b.duration, $,
+             flareIn: !!b.flare_in, flareOut: !!b.flare_out, layoutKind: S.geo ? S.geo.kind : "full" };
+  };
+
   // ---------------------------------------------------------------- setup
   window.setup = async function (spec) {
     S.spec = spec;
@@ -31,9 +47,12 @@
     stage.style.setProperty("--secondary", spec.brand.secondary);
     const capScale = (spec.beat.render && spec.beat.render.caption_scale) || 1;
     stage.style.setProperty("--cap-size", Math.round(spec.captions.size_px * capScale) + "px");
-    stage.className = "layout-" + spec.beat.layout;
+    const styleName = (spec.style && spec.style.name) || "ios";
+    stage.className = "style-" + styleName + " layout-" + spec.beat.layout;
     installFonts(spec);
     installStyle(spec.style_css);
+    if (spec.style_js) await installScript(spec.style_js);
+    S.style = STYLES[styleName] || {};
 
     $("footage").src = "";
     $("endcard").style.display = "none";
@@ -42,16 +61,22 @@
     $("widget").innerHTML = "";
     $("widget").style.cssText = "";
     $("captions").innerHTML = "";
+    $("bg").innerHTML = "";
+    $("fx").innerHTML = "";
+    $("fx").style.display = "none";
 
     const geo = layout(spec);
     S.geo = geo;
+    stage.classList.add("kind-" + geo.kind);
     if (spec.beat.layout === "logo-end-card") {
       buildEndCard(spec);
     } else {
       if (spec.beat.graphic) buildWidget(spec, geo);
       buildCaptions(spec, geo);
     }
+    if (S.style.setup) S.style.setup(ctxOf(0));
     await document.fonts.ready;
+    await Promise.all([...$("widget").querySelectorAll("img")].map((im) => im.decode().catch(() => {})));
     fitWidget(geo);
     return geo;
   };
@@ -93,6 +118,18 @@
       `@font-face{font-family:"${spec.brand.font.family}";font-weight:${f.weight};src:url("${f.url}");}`).join("\n");
   }
 
+  const loadedScripts = {};
+  function installScript(url) {
+    if (!loadedScripts[url]) {
+      loadedScripts[url] = new Promise((resolve) => {
+        const el = document.createElement("script");
+        el.src = url; el.onload = () => resolve(true); el.onerror = () => resolve(false);
+        document.head.appendChild(el);
+      });
+    }
+    return loadedScripts[url];
+  }
+
   function installStyle(url) {
     let link = $("style-css");
     if (!link) { link = document.createElement("link"); link.id = "style-css"; link.rel = "stylesheet"; document.head.appendChild(link); }
@@ -109,19 +146,38 @@
     const geo = { W, H, capH };
     const fw = $("footage-wrap"), bg = $("bg"), zone = $("widget-zone"), caps = $("captions");
 
-    if (b.layout === "white-card") {
-      const c = spec.style.layouts["white-card"].footage_card;
+    // A layout is one of three kinds: the footage fills the frame ("full"), sits in a card ("card"),
+    // or is not shown at all ("stage"). The style's layout definition says which, and where things go.
+    const L = (spec.style.layouts || {})[b.layout] || {};
+    const kind = L.kind || (L.footage_card ? "card" : "full");
+    geo.kind = kind;
+    if (kind === "card") {
+      const c = L.footage_card;
       const rect = { x: Math.round(c.x * W), y: Math.round(c.y * H), w: Math.round(c.w * W), h: Math.round(c.h * H) };
       fw.style.cssText = `inset:auto;left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px;` +
-        `border-radius:${c.radius || 48}px;box-shadow:0 30px 80px rgba(20,10,30,.22);`;
+        `border-radius:${c.radius || 48}px;box-shadow:var(--card-shadow, 0 30px 80px rgba(20,10,30,.22));`;
       bg.style.display = "block";
-      bg.className = "card-bg";
+      bg.className = L.bg_class || "card-bg";
       geo.card = rect;
       const zoneTop = rect.y + rect.h + Math.round(0.02 * H);
-      const capTop = Math.round(0.71 * H);
-      geo.zone = { top: zoneTop, bottom: capTop - Math.round(0.015 * H) };
-      geo.captions = { top: capTop, bottom: Math.round((1 - safe.bottom) * H) };
-      geo.captionTheme = "light";
+      const solo = !b.graphic && L.captions_solo;      // nothing under the card: the words may move up under it
+      const capTop = Math.round((solo ? solo.top : (L.captions_top || 0.71)) * H);
+      geo.zone = { top: zoneTop, bottom: Math.max(zoneTop + 40, capTop - Math.round(0.015 * H)) };
+      geo.captions = { top: capTop, bottom: solo ? Math.round(solo.bottom * H) : Math.round((1 - safe.bottom) * H) };
+      geo.captionTheme = L.caption_theme || "light";
+    } else if (kind === "stage") {
+      fw.style.cssText = "display:none";
+      bg.style.display = "block";
+      bg.className = L.bg_class || "stage-bg";
+      const z = L.zone || { top: 0.2, bottom: 0.62 };
+      // a style may give the words their own place: above a component (captions), or alone (captions_solo)
+      const cz = (!b.graphic && L.captions_solo) || L.captions || null;
+      const capTop = Math.round((cz ? cz.top : (L.captions_top || 0.70)) * H);
+      const capBottom = cz ? Math.round(cz.bottom * H) : Math.round((1 - safe.bottom) * H);
+      const wordsAbove = cz && cz.top < z.top;
+      geo.zone = { top: Math.round(z.top * H), bottom: wordsAbove ? Math.round(z.bottom * H) : Math.min(Math.round(z.bottom * H), capTop - Math.round(0.015 * H)) };
+      geo.captions = { top: capTop, bottom: capBottom };
+      geo.captionTheme = L.caption_theme || "dark";
     } else {
       fw.style.cssText = "";
       const anchor = (b.render && b.render.anchor) || (b.graphic && b.graphic.anchor) || "top";
@@ -133,7 +189,7 @@
       const bottomZone = { top: Math.round((noGo[3] + 0.02) * H), bottom: capTop - Math.round(0.015 * H) };
       const useBottom = anchor === "bottom" && (bottomZone.bottom - bottomZone.top) >= 0.12 * H;
       geo.zone = useBottom ? bottomZone : topZone;
-      geo.captionTheme = "dark";
+      geo.captionTheme = L.caption_theme || "dark";
     }
     zone.style.top = geo.zone.top + "px";
     zone.style.height = Math.max(40, geo.zone.bottom - geo.zone.top) + "px";
@@ -159,7 +215,7 @@
 
   function buildWidget(spec, geo) {
     const g = spec.beat.graphic;
-    const comp = COMPONENTS[g.component];
+    const comp = (S.style.components || {})[g.component] || COMPONENTS[g.component];
     const w = $("widget");
     if (!comp) { w.innerHTML = `<div class="widget w-unknown">${esc(g.component)}</div>`; S.widget = { animate() {} }; return; }
     const built = comp(g.props || {}, spec);
@@ -368,6 +424,7 @@
       if (logo) { logo.style.opacity = clamp(q * 1.4, 0, 1); logo.style.transform = `scale(${0.86 + 0.14 * q})`; }
       if (cta) cta.style.opacity = prog(t, 0.45, 0.4);
       if (url) url.style.opacity = prog(t, 0.75, 0.4);
+      if (S.style.frame) S.style.frame(ctxOf(t));
       return;
     }
     const w = $("widget");
@@ -377,8 +434,12 @@
       let opacity = clamp(enter * 1.6, 0, 1);
       const exitStart = b.duration - 0.2;
       if (!b.hold_widget && t > exitStart) opacity *= 1 - clamp((t - exitStart) / 0.2, 0, 1);
-      w.style.opacity = opacity;
-      w.style.transform = `translateY(${(1 - enter) * 28}px) scale(${S.fit * (0.96 + 0.04 * enter)})`;
+      if (S.style.widget) {
+        S.style.widget(w, { enter: prog(t, tIn, 0.42), opacity, fit: S.fit, t: Math.max(0, t - tIn) });
+      } else {
+        w.style.opacity = opacity;
+        w.style.transform = `translateY(${(1 - enter) * 28}px) scale(${S.fit * (0.96 + 0.04 * enter)})`;
+      }
       S.widget.animate(Math.max(0, t - tIn));
     }
     // captions
@@ -395,5 +456,6 @@
         sp.classList.toggle("said", j < active);
       });
     });
+    if (S.style.frame) S.style.frame(ctxOf(t));
   }
 })();

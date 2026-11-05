@@ -74,3 +74,28 @@ style is implied by the job.
 - "Lock" means private to the client and frozen until the client approves a new version.
 - Studiio can still see and render a client's locked style (to make their reels); it cannot
   change it without the client's approval.
+
+## Built on 2026-11-05
+
+- The library has a second style, **Aurora** (`styles/aurora/`), built from a studied reference:
+  a black stage, a living glow in the client's colours, word-by-word statements, frosted glass
+  stat, progress, list and chip, the client's own visual in a tilted glass frame, a bloom at every
+  change of layout. Nothing of the reference itself is reused.
+- A third style, **Explainer** (`styles/explainer/`), also from a studied reference: the captions
+  are the main graphic (each word appears as it is said, the key words in solid chips, a typing
+  cursor on the word being said), two stages (dark and light), and components for a client's own
+  product screen (push-in, cursor, click), steps joined by arrows, a notification and a number
+  tile. It needs real screens from the client to be worth using.
+- The renderer is style-aware: a style can bring `components.js` with its own components, a
+  `setup` and a `frame` hook for a background and effects, and a `widget` hook for how graphics
+  arrive. Layouts are of three kinds (`full`, `card`, `stage`), defined in the style's contract,
+  and a stage layout may place the captions itself (`captions`, `captions_solo`).
+  The iOS components still live in `renderer/render.js`; moving them out is not needed for this.
+- The planner, the quality check, revisions and the live editor read layouts and components from
+  the style instead of iOS names. Style-specific planning advice is the `planning` text in
+  `style.yaml`.
+- One style per reel, chosen on New job from the client's `style.allowed` list; the default is
+  the client's usual style. Per-beat mixing was not built, by decision.
+- Still to come from this plan: versions pinned per reel, client-owned styles with lock and
+  approval, and the draft flow for new styles.
+

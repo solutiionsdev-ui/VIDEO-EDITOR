@@ -65,6 +65,19 @@ file is written.
   `crop` (the 9:16 window in source pixels), `coverage` (share of frames with a face found).
   Watch `previews/face-preview.mp4`: green = raw detection, orange = smoothed track, red = no-go.
 
+## Styles
+
+A reel is planned in one style: the one chosen for the job (`meta.style` in `job.json`, set on New
+job) when the client's profile allows it (`style.allowed`), otherwise the client's usual
+`style.name`. The style card inside `beats-request.md` is the whole contract: use only its layouts
+and components, with its props, and follow its `planning` advice. The three styles differ in what
+carries a beat: **iOS** floats white cards over the footage; **Aurora** has a `stage` layout with no
+footage, where a statement or one number carries the frame while the voice continues; in
+**Explainer** the spoken words are the big text on a stage, so most stage beats need no component,
+only good `highlight_words`, and `screen` shows one of the client's own product screens. A layout
+that says `requires_graphic` always gets a component. Never plan a `screen` or `asset` without a
+file from the client visuals list.
+
 ## Writing the beat plan (stage 7) — this is Claude's job
 
 `./reel beats <job>` writes `<job>/beats-request.md` and stops with "Needs Claude" when no API

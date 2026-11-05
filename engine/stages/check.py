@@ -29,7 +29,7 @@ from ..job import Job, JobError, console, fmt_time
 from ..media import decode_audio, probe, run_ffmpeg
 from ..profile import get
 from ..render import compose
-from ..render.driver import FPS, HEIGHT, WIDTH, Renderer, beat_spec, widget_in_time
+from ..render.driver import FPS, HEIGHT, Renderer, WIDTH, beat_spec, layout_kind, neighbours, widget_in_time
 from ..text import normalize
 from .beats import load_style
 
@@ -167,7 +167,7 @@ def check_face_clear(job: Job, profile: dict, style: dict, beats: dict, cuts: di
     segs = {s["id"]: s for s in face["segments"]}
     sources = {s["index"]: s for s in face["sources"]}
     cut_segs = cuts["segments"]
-    card = style.get("layouts", {}).get("white-card", {}).get("footage_card", {})
+    layouts = style.get("layouts", {})
 
     def face_box_at(t_out: float) -> list[float] | None:
         seg = next((s for s in cut_segs if s["out_start"] <= t_out < s["out_start"] + s["duration"]), cut_segs[-1])
@@ -186,7 +186,7 @@ def check_face_clear(job: Job, profile: dict, style: dict, beats: dict, cuts: di
         sx, sy = WIDTH / crop["w"], HEIGHT / crop["h"]
         return [x * sx, y * sy, w * sx, h * sy]
 
-    def in_card(box: list[float]) -> list[float]:
+    def in_card(box: list[float], card: dict) -> list[float]:
         cx, cy, cw, ch = card["x"] * WIDTH, card["y"] * HEIGHT, card["w"] * WIDTH, card["h"] * HEIGHT
         scale = max(cw / WIDTH, ch / HEIGHT)
         dx, dy = cx + (cw - WIDTH * scale) / 2, cy + (ch - HEIGHT * scale) / 2
@@ -205,7 +205,12 @@ def check_face_clear(job: Job, profile: dict, style: dict, beats: dict, cuts: di
     n = len(beats["beats"])
     with Renderer() as r:
         for i, b in enumerate(beats["beats"]):
-            spec = beat_spec(b, profile, style, is_first=(i == 0), is_last=(i == n - 1), job_dir=job.path)
+            kind = layout_kind(style, b["layout"])
+            if kind == "stage":      # no footage on screen, so no face to cover
+                continue
+            prev, nxt = neighbours(beats["beats"], i, bool(beats.get("end_card")))
+            spec = beat_spec(b, profile, style, is_first=(i == 0), is_last=(i == n - 1), job_dir=job.path,
+                             prev_layout=prev, next_layout=nxt)
             r.setup(spec)
             times = sorted({round(x, 2) for x in np.arange(0.0, b["duration"], 0.2)} | {round(min(b["duration"] - 0.01, widget_in_time(spec) + 0.4), 2)})
             beat_worst = 0.0
@@ -214,8 +219,8 @@ def check_face_clear(job: Job, profile: dict, style: dict, beats: dict, cuts: di
                 fb = face_box_at(b["start"] + t)
                 if fb is None:
                     continue
-                if b["layout"] == "white-card":
-                    fb = in_card(fb)
+                if kind == "card":
+                    fb = in_card(fb, layouts[b["layout"]]["footage_card"])
                 samples += 1
                 for name in ("widget", "captions"):
                     ov = overlap(fb, boxes.get(name))
@@ -261,9 +266,12 @@ def check_clean_cuts(job: Job, cuts: dict) -> dict:
 def check_black_frozen(job: Job, video: Path, beats: dict, manifest: dict, style: dict) -> dict:
     """Black runs on the whole render; frozen runs per beat, on the footage region only."""
     res = compose.black_frozen(video, duration=float(beats["duration"]))
-    problems = [f"black from {fmt_time(a)} to {fmt_time(b)}" for a, b in res["black"]]
-    beats_hit = sorted({b["id"] for b in beats["beats"] for a, e in res["black"] if a < b["end"] and e > b["start"]})
-    card = style.get("layouts", {}).get("white-card", {}).get("footage_card", {})
+    stage_spans = [(b["start"], b["end"]) for b in beats["beats"] if layout_kind(style, b["layout"]) == "stage"]
+    # a dark stage is the look of a stage beat, not a fault: only black outside those beats counts
+    black = [(a, e) for a, e in res["black"] if not any(s - 0.05 <= a and e <= t + 0.05 for s, t in stage_spans)]
+    problems = [f"black from {fmt_time(a)} to {fmt_time(b)}" for a, b in black]
+    beats_hit = sorted({b["id"] for b in beats["beats"] for a, e in black if a < b["end"] and e > b["start"]})
+    layouts = style.get("layouts", {})
     cache = job.path / "renders" / "cache"
     by_id = {b["id"]: b for b in beats["beats"]}
     for m in manifest["beats"]:
@@ -272,7 +280,11 @@ def check_black_frozen(job: Job, video: Path, beats: dict, manifest: dict, style
         if not b or not clip.is_file() or b["duration"] < 0.25:
             continue
         crop = None
-        if b["layout"] == "white-card" and card:
+        kind = layout_kind(style, b["layout"])
+        if kind == "stage":      # nothing filmed is on screen; the graphics are checked by the visual comparison
+            continue
+        card = layouts.get(b["layout"], {}).get("footage_card")
+        if kind == "card" and card:
             crop = (int(card["w"] * WIDTH) // 2 * 2, int(card["h"] * HEIGHT) // 2 * 2, int(card["x"] * WIDTH), int(card["y"] * HEIGHT))
         r = compose.black_frozen(clip, duration=None, crop=crop)
         for a, e in r["frozen"]:
