@@ -220,7 +220,10 @@ def context_text(job: Job) -> str:
     if not beats:
         lines.append("No beat plan yet: the beats stage has not run, so there is nothing to change on a beat level.")
         return "\n".join(lines)
-    style = beats_stage.load_style(str(beats.get("style") or "ios"))
+    style = beats_stage.style_of(job, beats, load_profile(job.state.get("client")))
+    if style.get("_infographic"):
+        lines.append("This is an infographic video: a script, no footage and no speaker. Only the layouts without footage exist "
+                     f"({', '.join(style['layouts'])}), and every number in a graphic has to be in the script.")
     lines.append(f"Style {beats.get('style')} · {fmt_time(beats.get('duration', 0))} · beats v{beats.get('version', 1)}"
                  f" · hook: {beats.get('hook', '')}")
     visuals = beats_stage.asset_files(job, load_profile(job.state.get("client")))
@@ -262,7 +265,7 @@ def _style_card(job: Job) -> str:
     if not beats:
         return ""
     try:
-        return beats_stage.load_style(str(beats.get("style") or "ios")).get("_text", "")
+        return beats_stage.style_of(job, beats, load_profile(job.state.get("client"))).get("_text", "")
     except (JobError, OSError, KeyError):
         return ""
 
@@ -352,8 +355,9 @@ def validate_changes(job: Job, changes: object) -> list[str]:
     beats = _beats(job)
     ids = {b["id"]: b for b in beats["beats"]} if beats else {}
     profile = load_profile(job.state.get("client"))
-    style = beats_stage.load_style(str((beats or {}).get("style") or get(profile, "style.name", "ios")))
+    style = beats_stage.style_of(job, beats, profile)
     assets = beats_stage.asset_files(job, profile)
+    said = beats_stage.said_numbers(beats or {})
     last_id = beats["beats"][-1]["id"] if beats and beats["beats"] else None
     for i, ch in enumerate(changes):
         if not isinstance(ch, dict):
@@ -374,11 +378,15 @@ def validate_changes(job: Job, changes: object) -> list[str]:
             ch["args"] = {}
         elif not isinstance(ch["args"], dict):
             errors.append(f"change {i + 1}: args must be an object")
+        elif ch.get("op") == "set_layout" and ch["args"].get("layout") not in style.get("layouts", {}):
+            errors.append(f"change {i + 1}: this video has no layout {ch['args'].get('layout')!r}"
+                          + (" (an infographic has no footage to show)" if style.get("_infographic") else "")
+                          + f"; use one of: {', '.join(style.get('layouts', {}))}")
         elif ch.get("op") == "set_graphic" and b is not None:
             allowed = style.get("layouts", {}).get(b["layout"], {}).get("graphic_anchors", [])
             g = {"component": ch["args"].get("component"), "props": dict(ch["args"].get("props") or {}),
                  "anchor": ch["args"].get("anchor") or (b.get("graphic") or {}).get("anchor") or (allowed[0] if allowed else "top")}
-            errors += [f"change {i + 1}: {e}" for e in beats_stage.validate_graphic(style, b["layout"], g, assets, is_last=(b["id"] == last_id))]
+            errors += [f"change {i + 1}: {e}" for e in beats_stage.validate_graphic(style, b["layout"], g, assets, is_last=(b["id"] == last_id), said=said)]
             ch["args"] = g
         ch.setdefault("comment", "")
         ch.setdefault("rule", None)

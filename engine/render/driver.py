@@ -198,8 +198,14 @@ def widget_in_time(spec: dict) -> float:
     return spec["style"]["motion_first_beat_delay"] if spec["beat"]["is_first"] else 0.1
 
 
-def still_time(spec: dict) -> float:
-    """When to take the storyboard still: the widget is fully in and some captions are showing."""
+def still_time(spec: dict, style: dict | None = None) -> float:
+    """When to take the storyboard still: the widget is fully in and some captions are showing.
+    A component that builds through the beat (still: end in the style, e.g. a chart whose figures
+    appear as they are said) is shown finished, just before the beat ends."""
     d = spec["beat"]["duration"]
+    g = spec["beat"].get("graphic") or {}
+    comp = ((style or {}).get("components") or {}).get(g.get("component") or "") or {}
+    if comp.get("still") == "end":
+        return round(max(0.3, d - 0.45), 3)
     t = widget_in_time(spec) + 1.3
     return round(min(max(0.5, t), max(0.3, d * 0.65)), 3)

@@ -90,6 +90,87 @@
     },
   };
 
+  // ---- charts: every figure comes from the script, and appears when it is said
+  const digits = (v) => String(v ?? "").replace(/[^\d.,]/g, "").replace(/,/g, "").replace(/\.+$/, "");
+  // when a figure is said in this beat (seconds from the beat's start); null when it is not said here
+  const saidAt = (spec, value) => {
+    const want = digits(value);
+    if (!want) return null;
+    const hit = (spec.beat.words || []).find((w) => digits(w.w) === want);
+    return hit ? Math.max(0.1, hit.start - 0.12) : null;
+  };
+  components.bars = (p, spec) => {
+    const items = (p.items || []).slice(0, 5).map((it) => ({ label: String(it.label ?? ""), value: String(it.value ?? ""), n: parseNumber(it.value) }));
+    const max = Math.max(1e-9, ...items.map((it) => (it.n ? it.n.target : 0)));
+    const top = items.reduce((best, it, i) => ((it.n ? it.n.target : 0) > (items[best].n ? items[best].n.target : 0) ? i : best), 0);
+    return {
+      html: `<div class="xbars">${p.title ? `<div class="xbars-title">${esc(p.title)}</div>` : ""}${items.map((it, i) =>
+        `<div class="xbar${i === top ? " top" : ""}"><span class="xbar-label">${esc(it.label)}</span><div class="xbar-track"><div class="xbar-fill"></div></div><span class="xbar-value">${esc(it.value)}</span></div>`).join("")}</div>`,
+      animate: (root) => {
+        const rows = root.querySelectorAll(".xbar");
+        const stagger = clamp((spec.beat.duration - 1.6) / Math.max(1, rows.length), 0.14, 0.4);
+        const at = items.map((it, i) => saidAt(spec, it.value) ?? 0.1 + i * stagger);
+        return (t) => rows.forEach((r, i) => {
+          // the row (label and empty track) is there from the start; the bar and its number arrive when said
+          const it = items[i], q = prog(t, 0.08 + i * 0.1, 0.3), g = prog(t, at[i], 0.9), v = r.querySelector(".xbar-value");
+          r.style.opacity = q;
+          r.style.transform = `translateY(${((1 - q) * 18).toFixed(2)}px)`;
+          r.querySelector(".xbar-fill").style.width = ((it.n ? it.n.target / max : 0) * 100 * g).toFixed(2) + "%";
+          v.style.opacity = prog(t, at[i], 0.25);
+          if (it.n) v.textContent = showNumber(it.n, it.n.target * g);
+        });
+      },
+    };
+  };
+
+  components.donut = (p, spec) => {
+    const n = parseNumber(p.value), share = clamp((n ? n.target : 0) / 100, 0, 1), R = 84, C = 2 * Math.PI * R;
+    return {
+      html: `<div class="xdonut"><div class="xdonut-ring"><svg viewBox="0 0 200 200"><circle class="xdonut-bg" cx="100" cy="100" r="${R}"/>` +
+        `<circle class="xdonut-fg" cx="100" cy="100" r="${R}" stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="${C.toFixed(2)}"/></svg>` +
+        `<div class="xdonut-num">${esc(p.value ?? "")}</div></div>${p.label ? `<div class="xdonut-label">${esc(p.label)}</div>` : ""}</div>`,
+      animate: (root) => {
+        const fg = root.querySelector(".xdonut-fg"), num = root.querySelector(".xdonut-num"), label = root.querySelector(".xdonut-label");
+        const start = saidAt(spec, p.value) ?? 0.15;
+        return (t) => {
+          const g = prog(t, start, 1.1);
+          fg.setAttribute("stroke-dashoffset", (C * (1 - share * g)).toFixed(2));
+          num.style.opacity = prog(t, start, 0.25);
+          if (n) num.textContent = showNumber(n, n.target * g);
+          if (label) { const q = prog(t, start + 0.6, 0.35); label.style.opacity = q; label.style.transform = `translateY(${((1 - q) * 10).toFixed(2)}px)`; }
+        };
+      },
+    };
+  };
+
+  components.versus = (p, spec) => {
+    // "9 hours" is a big 9 over the word hours; "40%" and "$800" stay in one piece
+    const sides = (p.sides || []).slice(0, 2).map((sd) => {
+      const value = String(sd.value ?? "").trim(), m = value.match(/^(\S*\d\S*)\s+(.+)$/);
+      return { label: String(sd.label ?? ""), value, figure: m ? m[1] : value, unit: m ? m[2] : "", n: parseNumber(m ? m[1] : value) };
+    });
+    return {
+      html: `<div class="xvs">${sides.map((sd, i) => `<div class="xvs-side${i === 1 ? " b" : ""}"><div class="xvs-num">${esc(sd.figure)}</div>` +
+        `${sd.unit ? `<div class="xvs-unit">${esc(sd.unit)}</div>` : ""}<div class="xvs-label">${esc(sd.label)}</div></div>`).join("")}</div>`,
+      animate: (root) => {
+        const tiles = [...root.querySelectorAll(".xvs-side")], nums = tiles.map((tile) => tile.querySelector(".xvs-num"));
+        // one size for both figures: the largest at which the longer one still fits its tile
+        const fit = Math.min(1, ...tiles.map((tile, i) => (tile.clientWidth - 60) / Math.max(1, nums[i].scrollWidth)));
+        if (fit < 1) nums.forEach((num) => { num.style.fontSize = Math.floor(190 * fit) + "px"; });
+        const at = sides.map((sd, i) => saidAt(spec, sd.figure) ?? 0.1 + i * 0.55);
+        return (t) => tiles.forEach((tile, i) => {
+          // the two tiles and their labels are there from the start; each figure arrives when it is said
+          const q = prog(t, 0.08 + i * 0.14, 0.32), g = prog(t, at[i], 0.8), unit = tile.querySelector(".xvs-unit");
+          tile.style.opacity = q;
+          tile.style.transform = `translateY(${((1 - q) * 22).toFixed(2)}px) scale(${(0.96 + 0.04 * q).toFixed(3)})`;
+          nums[i].style.opacity = prog(t, at[i], 0.25);
+          if (unit) unit.style.opacity = prog(t, at[i] + 0.1, 0.25);
+          if (sides[i].n) nums[i].textContent = showNumber(sides[i].n, sides[i].n.target * g);
+        });
+      },
+    };
+  };
+
   STUDIIO.style("explainer", {
     components,
 

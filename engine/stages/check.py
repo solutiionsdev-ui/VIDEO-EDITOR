@@ -42,15 +42,17 @@ def run(job: Job, profile: dict, show: bool = False, version: int | None = None,
     if version is None:
         raise JobError("No render to check. Run `reel render <job>` first.")
     result = None
+    done: list[dict] = []          # what the rounds before this one repaired; kept in the final result
     for round_no in range(MAX_ROUNDS + 1):
         result = check_version(job, profile, version)
         result["round"] = round_no
+        result["fixes"] = list(done)
         job.write_json(f"renders/v{version}-check.json", result)
         failed = [k for k, c in result["checks"].items() if c["status"] == "fail"]
         if not failed or not fix or round_no == MAX_ROUNDS:
             break
         fixes = apply_fixes(job, profile, version, result)
-        result.setdefault("fixes", []).extend(fixes)
+        done += fixes
         if not fixes:
             break
         job.log(f"  round {round_no + 1}: " + "; ".join(f["what"] for f in fixes))
@@ -79,7 +81,7 @@ def check_version(job: Job, profile: dict, version: int) -> dict:
 
     checks = {
         "format": check_format(video, manifest),
-        "audio_level": check_audio_level(video),
+        "audio_level": check_audio_level(video, silent_by_design=_silent(job, manifest)),
         "caption_sync": check_caption_sync(beats, cuts, manifest),
         "face_clear": check_face_clear(job, profile, style, beats, cuts, face),
         "clean_cuts": check_clean_cuts(job, cuts),
@@ -113,7 +115,17 @@ def check_format(video: Path, manifest: dict) -> dict:
     return {"status": "fail" if problems else "pass", "detail": detail, "items": problems}
 
 
-def check_audio_level(video: Path) -> dict:
+def _silent(job: Job, manifest: dict) -> bool:
+    """An infographic video made from a script alone, with no music supplied, has nothing to hear."""
+    if manifest.get("music") or not job.has("script.json"):
+        return False
+    return job.read_json("script.json").get("source") == "script"
+
+
+def check_audio_level(video: Path, silent_by_design: bool = False) -> dict:
+    if silent_by_design:
+        return {"status": "review", "detail": "silent: no voice-over and no music supplied",
+                "items": ["add a voice-over or a music track, or accept a silent video"], "measured": None}
     m = compose.loudness(video)
     problems = []
     if m["lufs"] is None:

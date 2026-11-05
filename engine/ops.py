@@ -41,10 +41,12 @@ KEEP_FINISHED = 300
 ONLINE_AFTER_S = 30
 
 STAGE_OUTPUT = {
+    "script": "script.json",
     "intake": "intake.json", "audio": "audio/index.json", "transcribe": "transcript.json", "takes": "takes.json",
     "cuts": "cuts.json", "face": "face.json", "beats": "beats.json", "stills": "stills/index.json",
 }
 EDIT_STAGES = STAGES[:STAGES.index("stills") + 1]
+INFOGRAPHIC_STAGES = ["script", "beats", "stills"]      # a script stands in for intake … face
 WAIT_FILES = {"beat plan": "beats-plan.json", "revision plan": "revision-plan.json", "direction reply": "direction-reply.json"}
 REQUEST_FILES = {"beat plan": "beats-request.md", "revision plan": "revision-request.md", "direction reply": "direction-request.md"}
 KINDS = {"edit": "Edit", "revise": "Revise", "direction": "Direction"}
@@ -307,10 +309,14 @@ def versions(job: Job) -> list[dict]:
     return out
 
 
+def job_kind(job: Job) -> str:
+    return str(meta(job).get("kind") or "talking-head")
+
+
 def stage_rows(job: Job, current: str | None = None) -> list[dict]:
     stages = job.state.get("stages", {})
     rows = []
-    for s in STAGES:
+    for s in (INFOGRAPHIC_STAGES + ["render", "check"] if job_kind(job) == "infographic" else STAGES):
         st = stages.get(s, {}).get("status")
         kind = "done" if st == "done" else "failed" if st == "failed" else "now" if (s == current or st == "running") else "todo"
         rows.append({"name": s, "kind": kind, "seconds": stages.get(s, {}).get("seconds")})

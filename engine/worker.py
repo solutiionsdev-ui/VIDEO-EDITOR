@@ -103,6 +103,8 @@ def process_item(name: str, item: dict) -> None:
 # -- the two kinds of work -------------------------------------------------------------
 
 def _edit(job: Job, client: str | None, report, log: Path) -> tuple[str, str]:
+    if ops.job_kind(job) == "infographic":
+        return _run_stages(job, client, report, log, ops.INFOGRAPHIC_STAGES)
     footage = ops.meta(job).get("footage") or {}
     if footage.get("type") == "link" and footage.get("status") != "fetched":
         report("fetch footage", footage.get("url", ""))
@@ -114,7 +116,11 @@ def _edit(job: Job, client: str | None, report, log: Path) -> tuple[str, str]:
         ops.set_meta(job, footage={**footage, "status": "fetched", "file": saved.name, "bytes": saved.stat().st_size})
     if not job.raw_files():
         return "failed", "no footage in raw/"
-    for stage in ops.EDIT_STAGES:
+    return _run_stages(job, client, report, log, ops.EDIT_STAGES)
+
+
+def _run_stages(job: Job, client: str | None, report, log: Path, stages: list[str]) -> tuple[str, str]:
+    for stage in stages:
         if _done(job, stage):
             continue
         code = _stage(job, client, stage, report, log)

@@ -27,7 +27,8 @@ from ..job import RAW_EXTENSIONS, Job, JobError, console, fmt_clock, fmt_time
 from ..profile import CLIENTS_DIR, ROOT
 from ..review import _CSS, _JS, sections
 from ..profile import load_profile
-from ..stages.beats import ASSET_EXT, asset_files, load_style
+from ..stages.beats import ASSET_EXT, asset_files, load_style, styles_for
+from ..stages.script import VOICE_EXT
 from ..stages.revise import OPS, _BEAT_RE, _TIME_RE
 
 HERE = Path(__file__).parent
@@ -164,16 +165,30 @@ def queue_page(request: Request):
 def new_job_form(request: Request, client: str = ""):
     clients = ops.list_clients()
     return page(request, "new.html", title="New job", crumb="content / new job", nav="new", clients=clients, error=None,
-                formats=_formats(clients), styles=_style_choices(clients),
+                formats=_formats(clients), styles=_style_choices(clients), pace=_pace(clients),
                 values={"client": client or (clients[0]["slug"] if clients else ""), "title": "", "footage_url": "",
-                        "notes": "", "due": "", "style": ""})
+                        "notes": "", "due": "", "style": "", "kind": "talking-head", "script": ""})
+
+
+KINDS = ("talking-head", "infographic")
 
 
 def _style_choices(clients: list[dict]) -> dict:
-    """The styles each client may pick for a video, default first: {client slug: [{name, title}]}."""
+    """The styles each client may pick for a video of each kind, the client's usual one first:
+    {client slug: {kind: [{name, title, usual}]}}. An infographic needs a style with a layout that shows no footage."""
     titles = {s["name"]: s["title"] for s in ops.list_styles()}
-    return {c["slug"]: [{"name": n, "title": titles.get(n, n)} for n in ops.allowed_styles(c["profile"]) if n in titles]
-            for c in clients}
+    out = {}
+    for c in clients:
+        allowed = [n for n in ops.allowed_styles(c["profile"]) if n in titles]
+        out[c["slug"]] = {kind: [{"name": n, "title": titles[n], "usual": n == allowed[0]} for n in styles_for(kind, allowed)]
+                          for kind in KINDS}
+    return out
+
+
+def _pace(clients: list[dict]) -> dict:
+    """Per client: the reading pace of a video with no voice and the longest a reel may be."""
+    return {c["slug"]: {"wps": float((c["profile"].get("infographic") or {}).get("words_per_second", 2.6)),
+                        "max_s": float((c["profile"].get("format") or {}).get("max_length_s", 60))} for c in clients}
 
 
 def _formats(clients: list[dict]) -> dict:
@@ -181,34 +196,52 @@ def _formats(clients: list[dict]) -> dict:
     for c in clients:
         p = c["profile"]
         f = p.get("format") or {}
-        out[c["slug"]] = (f"{f.get('aspect', '9:16')} · max {f.get('max_length_s', 60)} s · {p.get('style', {}).get('name', 'ios')} style"
+        out[c["slug"]] = (f"{f.get('aspect', '9:16')} · max {f.get('max_length_s', 60)} s"
                           f" · captions {p.get('captions', {}).get('font', '')} {p.get('captions', {}).get('size_px', '')} px")
     return out
 
 
 @app.post("/jobs/new")
 async def create_job(request: Request, client: str = Form(""), title: str = Form(""), footage_url: str = Form(""),
-                     notes: str = Form(""), due: str = Form(""), style: str = Form(""),
-                     files: list[UploadFile] = File(default=[])):
+                     notes: str = Form(""), due: str = Form(""), style: str = Form(""), kind: str = Form("talking-head"),
+                     script: str = Form(""), files: list[UploadFile] = File(default=[]),
+                     voice: list[UploadFile] = File(default=[])):
     clients = ops.list_clients()
-    values = {"client": client, "title": title, "footage_url": footage_url.strip(), "notes": notes, "due": due, "style": style}
-    uploads = [f for f in files if f.filename]
+    kind = kind if kind in KINDS else "talking-head"
+    info = kind == "infographic"
+    values = {"client": client, "title": title, "footage_url": footage_url.strip(), "notes": notes, "due": due, "style": style,
+              "kind": kind, "script": script}
+    uploads = [] if info else [f for f in files if f.filename]
+    voices = [f for f in voice if f.filename] if info else []
+    choices = _style_choices(clients)
 
     def fail(msg: str):
         return page(request, "new.html", title="New job", crumb="content / new job", nav="new", clients=clients,
-                    error=msg, values=values, formats=_formats(clients), styles=_style_choices(clients))
+                    error=msg, values=values, formats=_formats(clients), styles=choices, pace=_pace(clients))
 
     if not any(c["slug"] == client for c in clients):
         return fail("Pick a client.")
     if not title.strip():
         return fail("Give the reel a title.")
-    if not uploads and not values["footage_url"]:
-        return fail("Add the footage: a link or a file.")
-    if values["footage_url"] and not re.match(r"https?://", values["footage_url"]):
-        return fail("The footage link has to start with http:// or https://")
-    for f in uploads:
-        if Path(f.filename).suffix.lower() not in RAW_EXTENSIONS:
-            return fail(f"{f.filename} is not a video file the engine accepts ({', '.join(sorted(RAW_EXTENSIONS))}).")
+    allowed = [c["name"] for c in choices[client][kind]]
+    if info:
+        if not script.strip():
+            return fail("Write the script: the words the video says. Every number on screen comes from it.")
+        if not allowed:
+            return fail("None of this client's styles can make an infographic. Allow Explainer or Aurora in the client profile.")
+        if len(voices) > 1:
+            return fail("One voice-over file is enough.")
+        for f in voices:
+            if Path(f.filename).suffix.lower() not in VOICE_EXT:
+                return fail(f"{f.filename} is not an audio file the engine accepts ({', '.join(sorted(VOICE_EXT))}).")
+    else:
+        if not uploads and not values["footage_url"]:
+            return fail("Add the footage: a link or a file.")
+        if values["footage_url"] and not re.match(r"https?://", values["footage_url"]):
+            return fail("The footage link has to start with http:// or https://")
+        for f in uploads:
+            if Path(f.filename).suffix.lower() not in RAW_EXTENSIONS:
+                return fail(f"{f.filename} is not a video file the engine accepts ({', '.join(sorted(RAW_EXTENSIONS))}).")
 
     base = f"{client}-{ops.slug(title)}"
     name, n = base, 2
@@ -220,16 +253,25 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
         safe = re.sub(r"[^\w.\-]+", "_", Path(f.filename).name)
         with (path / "raw" / safe).open("wb") as out:
             shutil.copyfileobj(f.file, out, 1 << 20)
+    if info:
+        (path / "script.md").write_text(script.replace("\r\n", "\n").strip() + "\n", encoding="utf-8")
+        for f in voices:
+            (path / "voiceover").mkdir(exist_ok=True)
+            safe = re.sub(r"[^\w.\-]+", "_", Path(f.filename).name)
+            with (path / "voiceover" / safe).open("wb") as out:
+                shutil.copyfileobj(f.file, out, 1 << 20)
     if notes.strip():
         (path / "note.md").write_text(notes.strip() + "\n", encoding="utf-8")
     job = Job(path)
     job.state["client"] = client
-    footage = ({"type": "link", "url": values["footage_url"], "status": "pending"} if values["footage_url"]
-               else {"type": "upload", "status": "fetched", "files": [f.filename for f in uploads]})
-    allowed = [c["name"] for c in _style_choices(clients).get(client, [])]
     chosen = style if style in allowed else (allowed[0] if allowed else "")
-    job.state["meta"] = {"title": title.strip(), "notes": notes.strip(), "footage": footage, "due": due.strip(), "style": chosen,
+    job.state["meta"] = {"title": title.strip(), "notes": notes.strip(), "due": due.strip(), "style": chosen, "kind": kind,
                          "created_by": "platform"}
+    if info:
+        job.state["meta"]["voice"] = voices[0].filename if voices else None
+    else:
+        job.state["meta"]["footage"] = ({"type": "link", "url": values["footage_url"], "status": "pending"} if values["footage_url"]
+                                        else {"type": "upload", "status": "fetched", "files": [f.filename for f in uploads]})
     job.save_state()
     ops.enqueue(job.name, "edit", note=title.strip())
     return RedirectResponse(f"/jobs/{job.name}", status_code=303)

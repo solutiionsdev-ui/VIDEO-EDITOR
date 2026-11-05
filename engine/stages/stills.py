@@ -45,7 +45,7 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
             prev, nxt = neighbours(beats["beats"], i, bool(beats.get("end_card")))
             spec = beat_spec(beat, profile, style, is_first=(i == 0), is_last=(i == n - 1), job_dir=job.path,
                              prev_layout=prev, next_layout=nxt)
-            t = still_time(spec)
+            t = still_time(spec, style)
             frame = None if layout_kind(style, beat["layout"]) == "stage" else \
                 compose.extract_frame(base, beat["start"] + t, tmp / f"frame-{beat['id']:02d}.jpg")
             out = stills_dir / f"beat-{beat['id']:02d}.jpg"

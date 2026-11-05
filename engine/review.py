@@ -193,7 +193,11 @@ def _hero(job: Job, client_name: str, beats: dict | None, cuts: dict | None, pro
     else:
         lede = "No cut yet. Run the engine stages first."
     pills = []
-    if cuts:
+    script = job.read_json("script.json") if job.has("script.json") else None     # an infographic: a script, no footage
+    if script:
+        pills.append(_pill("infographic"))
+        pills.append(_pill(f"{fmt_clock(script['seconds'])} · " + (f"voice-over {script['voice']}" if script.get("voice") else "no voice, captions at a reading pace")))
+    elif cuts:
         pills.append(_pill(f"{fmt_clock(cuts['summary']['seconds_out'])} edited"))
         pills.append(_pill(f"raw {fmt_clock(cuts['summary']['seconds_in'])}"))
     if beats:

@@ -1,29 +1,77 @@
 {% extends "base.html" %}{% block content %}
 {% include "_titlebar.html" %}
-<form class="panel" method="post" action="/jobs/new" enctype="multipart/form-data" style="max-width:780px">
+<form class="panel" method="post" action="/jobs/new" enctype="multipart/form-data" style="max-width:780px" id="newjob">
 <h3 style="font-size:18px">Idea</h3>
 {% if error %}<div class="err-box">{{ error }}</div>{% endif %}
+<label class="f">What kind of video</label>
+<div class="seg" id="kind"><input type="hidden" name="kind" value="{{ values.kind }}">
+<button type="button" data-kind="talking-head"><b>Talking head</b><span>Someone speaks to the camera. The engine cuts the footage and adds graphics.</span></button>
+<button type="button" data-kind="infographic"><b>Infographic</b><span>No camera. A script becomes charts, numbers and screens, with captions.</span></button></div>
 <label class="f">Title</label><input type="text" name="title" value="{{ values.title }}" placeholder="The full lead journey, tracked live" required>
-<div class="row3"><div><label class="f">Client</label><select name="client" id="client">{% for c in clients %}<option value="{{ c.slug }}" {{ 'selected' if c.slug == values.client else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
-<div><label class="f">Due</label><input type="date" name="due" value="{{ values.due }}"></div>
-<div><label class="f">Type</label><input type="text" value="Main edit · talking head" disabled></div></div>
+<div class="row"><div><label class="f">Client</label><select name="client" id="client">{% for c in clients %}<option value="{{ c.slug }}" {{ 'selected' if c.slug == values.client else '' }}>{{ c.name }}</option>{% endfor %}</select></div>
+<div><label class="f">Due</label><input type="date" name="due" value="{{ values.due }}"></div></div>
 <div id="stylebox"><label class="f">Style for this video</label><select name="style" id="style" data-current="{{ values.style }}"></select>
-<p class="dim" style="margin:6px 0 0;font-size:13px">One look for the whole reel. The first is the client's usual style; the brand colours, font and logo stay the same in every style. <a href="/styles">See the styles</a>.</p></div>
+<p class="dim" style="margin:6px 0 0;font-size:13px" id="stylehint"></p></div>
 <label class="f">Format</label><div class="chips" style="margin-top:0" id="fmt">{% for slug, text in formats.items() %}<span class="chip static" data-client="{{ slug }}" {% if slug != values.client %}style="display:none"{% endif %}>{{ text }}</span>{% endfor %}</div>
+
+<div data-for="talking-head">
 <div class="label" style="margin-top:22px">Footage and video</div>
 <div class="row"><div><label class="f">Raw footage</label><input type="file" name="files" multiple accept="video/*,.mov,.mp4,.m4v,.mkv,.webm,.mts"></div>
 <div><label class="f">Footage link</label><input type="url" name="footage_url" value="{{ values.footage_url }}" placeholder="https://drive.google.com/file/d/…"></div></div>
 <p class="dim" style="margin:8px 0 0">A Google Drive link works when the file is shared with anyone with the link. One of the two is enough.</p>
+</div>
+
+<div data-for="infographic">
+<div class="label" style="margin-top:22px">Script</div>
+<label class="f">The words of the video</label>
+<textarea name="script" id="script" rows="9" placeholder="Write it the way it should be read, one idea per sentence. A blank line starts a new part.&#10;&#10;Most leads go cold in the first hour. 78% of buyers choose the first company that answers…">{{ values.script }}</textarea>
+<p class="dim" style="margin:6px 0 0;font-size:13px" id="scriptinfo"></p>
+<p class="dim" style="margin:6px 0 0;font-size:13px">Every number, name and label on screen is taken from this script. Nothing is added to it.</p>
+<label class="f">Voice-over <span class="dim">(optional)</span></label><input type="file" name="voice" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac">
+<p class="dim" style="margin:6px 0 0;font-size:13px">A recording of this script being read. The video then follows the voice. Without one, the video is silent with captions timed at a reading pace.</p>
+</div>
+
 <label class="f">Notes for the edit</label><textarea name="notes" placeholder="Anything the editor should know: what to keep, what to cut, the one message of the video.">{{ values.notes }}</textarea>
 <div class="actions"><button class="btn">Add to the queue</button><a class="btn ghost" href="/">Cancel</a><span class="dim">Captions, colours and rules come from the <a href="/clients">client profile</a>.</span></div>
 </form>
 {% endblock %}
 {% block scripts %}<script>
-(function(){ const s=document.getElementById('client'); if(!s) return;
-  const STYLES = {{ styles|tojson }}, box = document.getElementById('stylebox'), sel = document.getElementById('style');
-  function fill(){ const list = STYLES[s.value] || []; sel.innerHTML = list.map((x, i) => `<option value="${x.name}">${x.title}${i === 0 ? ' (the client\'s usual)' : ''}</option>`).join('');
+(function(){ const s = document.getElementById('client'); if (!s) return;
+  const STYLES = {{ styles|tojson }}, PACE = {{ pace|tojson }};
+  const box = document.getElementById('stylebox'), sel = document.getElementById('style'), hint = document.getElementById('stylehint');
+  const seg = document.getElementById('kind'), kindInput = seg.querySelector('input'), script = document.getElementById('script'), info = document.getElementById('scriptinfo');
+  const kind = () => kindInput.value;
+  function fill() {
+    const list = (STYLES[s.value] || {})[kind()] || [];
+    sel.innerHTML = list.map(x => `<option value="${x.name}">${x.title}${x.usual ? ' (the client\'s usual)' : ''}</option>`).join('');
     if (sel.dataset.current && list.some(x => x.name === sel.dataset.current)) sel.value = sel.dataset.current;
-    box.style.display = list.length > 1 ? '' : 'none'; }   // one style: nothing to choose
-  fill();
-  s.addEventListener('change',()=>{ sel.dataset.current = ''; fill(); document.querySelectorAll('#fmt .chip').forEach(c=>c.style.display=c.dataset.client===s.value?'':'none'); }); })();
+    sel.style.display = list.length > 1 ? '' : 'none';
+    box.style.display = (list.length > 1 || kind() === 'infographic') ? '' : 'none';   // one style: nothing to choose
+    hint.innerHTML = !list.length ? 'None of this client\'s styles can make an infographic. Allow Explainer or Aurora in the <a href="/clients">client profile</a>.'
+      : list.length === 1 ? `This video will be made in <b>${list[0].title}</b>. <a href="/styles">See the styles</a>.`
+      : (kind() === 'infographic' ? 'Only the styles that can fill the frame without a camera are listed. ' : 'One look for the whole reel. ') +
+        'The brand colours, font and logo stay the same in every style. <a href="/styles">See the styles</a>.';
+  }
+  function show() {
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.kind === kind()));
+    document.querySelectorAll('[data-for]').forEach(el => { const on = el.dataset.for === kind(); el.style.display = on ? '' : 'none';
+      el.querySelectorAll('input, textarea').forEach(i => { i.disabled = !on; }); });
+    fill(); count();
+  }
+  // the same arithmetic as the engine: a steady pace, a breath at commas, sentences and paragraphs
+  function count() {
+    const text = script.value.trim(), p = PACE[s.value] || {wps: 2.6, max_s: 60};
+    if (!text) { info.textContent = ''; return; }
+    const words = text.split(/\s+/).length, commas = (text.match(/[,;،](?=\s|$)/g) || []).length;
+    const sentences = text.split(/(?<=[.!?…؟:])\s+/).filter(x => x.trim()).length, paras = text.split(/\n\s*\n/).filter(x => x.trim()).length;
+    const secs = 0.9 + words / p.wps + commas * 0.18 + sentences * 0.42 + paras * 0.35;
+    info.innerHTML = `${words} words · about ${Math.round(secs)} s without a voice-over` +
+      (secs > p.max_s ? ` · <b style="color:var(--bad, #c0392b)">longer than this client's ${Math.round(p.max_s)} s limit</b>` : '');
+  }
+  seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { kindInput.value = b.dataset.kind; sel.dataset.current = ''; show(); }));
+  script.addEventListener('input', count);
+  s.addEventListener('change', () => { sel.dataset.current = ''; fill(); count();
+    document.querySelectorAll('#fmt .chip').forEach(c => c.style.display = c.dataset.client === s.value ? '' : 'none'); });
+  show();
+})();
 </script>{% endblock %}

@@ -20,7 +20,7 @@ import yaml
 
 from ..job import Job, JobError, console, fmt_time
 from ..text import normalize
-from .beats import NEEDS_OPERATOR, NeedsOperator, asset_files, graphic_copy, load_style, validate_graphic
+from .beats import NEEDS_OPERATOR, NeedsOperator, asset_files, graphic_copy, job_kind, load_style, said_numbers, stage_only, validate_graphic
 
 REQUEST = "revision-request.md"
 PLAN = "revision-plan.json"
@@ -194,7 +194,10 @@ def apply_changes(job: Job, beats: dict, profile: dict, changes: list[dict]) -> 
     by_id = {b["id"]: b for b in beats["beats"]}
     new_version = int(beats.get("version", 1)) + 1
     style = load_style(str(beats.get("style") or profile.get("style", {}).get("name") or "ios"))
+    if job_kind(job) == "infographic":      # no footage: only layouts that show none
+        style = stage_only(style)
     assets = asset_files(job, profile)
+    said = said_numbers(beats)
     last_id = beats["beats"][-1]["id"] if beats["beats"] else None
     applied: list[dict] = []
     skipped: list[str] = []
@@ -249,7 +252,7 @@ def apply_changes(job: Job, beats: dict, profile: dict, changes: list[dict]) -> 
             allowed = style.get("layouts", {}).get(b["layout"], {}).get("graphic_anchors", [])
             g = {"component": args.get("component"), "props": dict(args.get("props") or {}),
                  "anchor": args.get("anchor") or (b.get("graphic") or {}).get("anchor") or (allowed[0] if allowed else "top")}
-            problems = validate_graphic(style, b["layout"], g, assets, is_last=(b["id"] == last_id))
+            problems = validate_graphic(style, b["layout"], g, assets, is_last=(b["id"] == last_id), said=said)
             if problems:
                 skipped.append(f"beat {b['id']}: {'; '.join(problems)}")
                 continue

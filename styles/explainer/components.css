@@ -57,6 +57,44 @@
 .xstat-num { font-size: 132px; font-weight: 700; letter-spacing: -0.035em; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .xstat-label { display: inline-block; margin-top: 18px; font-size: 34px; font-weight: 600; background: var(--chip); color: #fff; border-radius: 14px; padding: 6px 20px; letter-spacing: -0.01em; }
 
+/* bars that grow to their values */
+.xbars { width: 940px; display: flex; flex-direction: column; gap: 36px; }
+.xbars-title { font-size: 36px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #6b6d7c; margin-bottom: 6px; }
+.layout-stage-dark .xbars-title { color: rgba(255,255,255,.62); }
+.xbar { display: grid; grid-template-columns: 270px 1fr 190px; align-items: center; gap: 26px; opacity: 0; }
+.xbar-label { font-size: 48px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.12; color: var(--ink); }
+.xbar-track { height: 104px; border-radius: 28px; background: rgba(11,11,16,.07); overflow: hidden; }
+.xbar-fill { height: 100%; width: 0; border-radius: 28px; background: var(--ink); }
+.xbar.top .xbar-fill { background: var(--chip); }
+.xbar-value { font-size: 64px; font-weight: 700; letter-spacing: -0.03em; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.layout-stage-dark .xbar-label, .layout-stage-dark .xbar-value { color: #fff; }
+.layout-stage-dark .xbar-track { background: rgba(255,255,255,.12); }
+.layout-stage-dark .xbar-fill { background: #fff; }
+.layout-stage-dark .xbar.top .xbar-fill { background: var(--chip); }
+
+/* one share as a ring */
+.xdonut { display: flex; flex-direction: column; align-items: center; gap: 30px; }
+.xdonut-ring { position: relative; width: 520px; height: 520px; }
+.xdonut-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.xdonut-bg { fill: none; stroke: rgba(11,11,16,.08); stroke-width: 26; }
+.xdonut-fg { fill: none; stroke: var(--chip); stroke-width: 26; stroke-linecap: round; }
+.layout-stage-dark .xdonut-bg { stroke: rgba(255,255,255,.14); }
+.xdonut-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 150px; font-weight: 700; letter-spacing: -0.04em;
+              font-variant-numeric: tabular-nums; color: var(--ink); }
+.layout-stage-dark .xdonut-num { color: #fff; }
+.xdonut-label { font-size: 40px; font-weight: 600; background: var(--chip); color: #fff; border-radius: 16px; padding: 8px 24px; letter-spacing: -0.012em; opacity: 0; }
+
+/* two numbers against each other */
+.xvs { width: 940px; display: flex; align-items: stretch; gap: 28px; }
+.xvs-side { flex: 1 1 0; min-width: 0; background: #fff; color: var(--ink); border-radius: 40px; padding: 44px 30px 42px; text-align: center; opacity: 0;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            box-shadow: 0 0 0 1.5px rgba(10,10,30,.07), 0 30px 80px rgba(10,10,30,.2); }
+.xvs-side.b { background: var(--chip); color: #fff; box-shadow: 0 30px 80px color-mix(in srgb, var(--chip) 45%, transparent); }
+.layout-stage-dark .xvs-side { box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+.xvs-num { font-size: 190px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.xvs-unit { font-size: 54px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin-top: 6px; }
+.xvs-label { font-size: 40px; font-weight: 600; margin-top: 22px; letter-spacing: -0.012em; opacity: .7; }
+
 /* a client visual that is not a screen */
 .w-asset { background: #fff; border-radius: 34px; padding: 16px 16px 14px; box-shadow: 0 0 0 1.5px rgba(10,10,30,.07), 0 36px 100px rgba(10,10,30,.26); max-width: 920px; }
 .asset { display: flex; flex-direction: column; align-items: center; }

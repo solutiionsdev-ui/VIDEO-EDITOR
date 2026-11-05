@@ -104,7 +104,11 @@ def run(job: Job, profile: dict, show: bool = False, workers: int | None = None,
     compose.concat_videos(parts, joined)
     total = beats_doc["duration"] + (END_CARD_SECONDS if end_item else 0.0)
     music = compose.find_music(job, profile)
-    job.log(f"  audio: voice normalised to -14 LUFS" + (f", music {music.name} ducked {get(profile, 'music.ducking_db', -18)} dB" if music else ", no music track supplied"))
+    voiceless = job.has("script.json") and not job.read_json("script.json").get("voice")     # an infographic made from the script alone
+    if voiceless:
+        job.log(f"  audio: no voice-over; music {music.name} normalised to -14 LUFS" if music else "  audio: silent, no voice-over and no music track supplied")
+    else:
+        job.log(f"  audio: voice normalised to -14 LUFS" + (f", music {music.name} ducked {get(profile, 'music.ducking_db', -18)} dB" if music else ", no music track supplied"))
     compose.mix_and_mux(joined, base, out, total=total, music=music,
                         ducking_db=float(get(profile, "music.ducking_db", -18)))
     joined.unlink(missing_ok=True)

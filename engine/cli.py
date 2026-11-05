@@ -25,9 +25,10 @@ from rich.table import Table
 from . import __version__
 from .job import RUN_DEFAULT_TO, STAGES, Job, JobError, console
 from .profile import load_profile
-from .stages import audio, beats, check, cuts, face, intake, render, revise, stills, takes, transcribe
+from .stages import audio, beats, check, cuts, face, intake, render, revise, script, stills, takes, transcribe
 
 STAGE_MODULES = {
+    "script": script,       # infographic videos: stands in for intake … face
     "intake": intake,
     "audio": audio,
     "transcribe": transcribe,
@@ -198,7 +199,7 @@ def _run_one(job: Job, profile: dict, stage: str, show: bool, preview: bool = Tr
         raise JobError(f"'{stage}' needs {need}. Run the earlier stages first (or `reel run {job.path}`).")
     module = STAGE_MODULES[stage]
     kwargs = {}
-    if stage in ("transcribe", "takes", "cuts", "face", "beats", "stills", "render", "check"):
+    if stage in ("script", "transcribe", "takes", "cuts", "face", "beats", "stills", "render", "check"):
         kwargs["show"] = show
     if stage in ("cuts", "face"):
         kwargs["preview_video"] = preview
@@ -247,11 +248,16 @@ def cmd_run(args) -> int:
     """
     job, profile = _open(args)
     client = getattr(args, "client", None) or job.state.get("client")
-    start = STAGES.index(args.from_stage) if args.from_stage else 0
-    stop = STAGES.index(args.to_stage)
+    order = list(STAGES)
+    if beats.job_kind(job) == "infographic":      # the script stands in for intake … face
+        order = ["script"] + STAGES[STAGES.index("beats"):]
+    def at(name):
+        return order.index(name) if name in order else 0
+    start = at(args.from_stage) if args.from_stage else 0
+    stop = at(args.to_stage)
     if stop < start:
         raise JobError("--to comes before --from")
-    for stage in STAGES[start:stop + 1]:
+    for stage in order[start:stop + 1]:
         cmd = [sys.executable, "-m", "engine.cli", stage, str(job.path)]
         if client:
             cmd += ["--client", client]
@@ -272,12 +278,16 @@ def cmd_run(args) -> int:
             console.print(f"\n[red bold]Stopped:[/] stage '{stage}' failed (see above).")
             return code
     console.rule("[bold]result")
-    if job.has("takes.json"):
-        takes.report(job, job.read_json("takes.json"))
-    if job.has("cuts.json"):
-        cuts.report(job, job.read_json("cuts.json"))
-    if job.has("face.json"):
-        face.report(job, job.read_json("face.json"))
+    if beats.job_kind(job) == "infographic":      # no footage: no takes, cut or face to report
+        if job.has(script.OUTPUT):
+            script.report(job, job.read_json(script.OUTPUT))
+    else:
+        if job.has("takes.json"):
+            takes.report(job, job.read_json("takes.json"))
+        if job.has("cuts.json"):
+            cuts.report(job, job.read_json("cuts.json"))
+        if job.has("face.json"):
+            face.report(job, job.read_json("face.json"))
     if job.has("beats.json"):
         beats.report(job, job.read_json("beats.json"))
     cmd_status(args)
@@ -315,8 +325,12 @@ def cmd_status(args) -> int:
     table.add_column("result")
     outputs = {"intake": "intake.json", "audio": "audio/index.json", "transcribe": "transcript.json",
                "takes": "takes.json", "cuts": "cuts.json", "face": "face.json", "beats": "beats.json",
-               "stills": "stills/index.json", "render": "renders/v1.mp4", "check": "renders/v1-check.json"}
-    for stage in STAGES:
+               "stills": "stills/index.json", "render": "renders/v1.mp4", "check": "renders/v1-check.json",
+               "script": script.OUTPUT}
+    order = STAGES
+    if beats.job_kind(job) == "infographic":      # one stage where footage has six
+        order = ["script"] + STAGES[STAGES.index("beats"):]
+    for stage in order:
         entry = job.state.get("stages", {}).get(stage, {})
         status = entry.get("status", "—")
         colour = {"done": "green", "failed": "red", "running": "yellow"}.get(status, "dim")

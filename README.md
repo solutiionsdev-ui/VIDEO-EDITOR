@@ -1,6 +1,7 @@
 # Studiio Reel Editor
 
 Turns raw talking-head footage into a ready-to-post vertical reel, in the client's brand style.
+It also makes **infographic videos**: a script and no camera (see "Infographic videos" below).
 Read [BRIEF.md](BRIEF.md) for the full plan. This repo is **Phase 1: the engine**, run from the
 command line on one machine.
 
@@ -19,6 +20,35 @@ command line on one machine.
 | 10. Render | `./reel render <job>` | `renders/v1.mp4` (+ `renders/v1.json`) | ✅ |
 | 11. Quality check | `./reel check <job>` (also runs after every render) | `renders/v1-check.json` | ✅ |
 | 12. Revision | `./reel revise <job> "beat 4: captions bigger"` | `beats.json` v2, profile feedback log, `renders/v2.mp4` | ✅ |
+
+## Infographic videos
+
+A job can be an infographic instead of a talking head: there is no footage, the frame is a stage,
+and the picture is type, numbers and charts. It is chosen on **New job** (or `meta.kind:
+infographic` in `job.json`), and its inputs are:
+
+- `script.md` in the job folder: the words of the video, required. A blank line starts a new part.
+- `voiceover/<file>` (mp3, wav, m4a…): optional, a recording of that script being read.
+
+`./reel script <job>` stands in for stages 1 to 6. With a voice-over it wraps the recording in a
+blank picture and runs the usual audio, transcription, takes and cut stages on it, then writes the
+script's own spelling over what the transcriber heard. Without one it gives every word a time at
+a reading pace (`infographic.words_per_second`, 2.6 by default, with a breath at commas, sentences
+and paragraphs) and the video is silent with captions. Everything after that is the same pipeline:
+beat plan, stills, render, quality check, revisions, comments. `./reel run` knows the difference.
+
+What is different for an infographic:
+
+- Only styles with a layout that shows no footage can make one (Explainer and Aurora today; iOS
+  cannot). Explainer is offered first: it has the charts (`bars`, `donut`, `versus`) next to
+  `stat`, `flow` and `note`.
+- **Every number on screen has to be in the script.** For a talking head an unsaid number is a
+  warning; here it stops the plan, and a comment that asks for an invented figure is refused.
+- A chart may stay through the sentences that give its figures (one beat of up to 9 s,
+  `infographic.hard_max_s`), and each bar, ring or number arrives at the moment it is said.
+- With no voice-over and no music the quality check says **review: silent**, not pass: add a
+  track, or accept a silent video.
+- There is no AI voice. The voice is a recording the client or the editor supplies.
 
 ## Quality check and revisions (stages 11 and 12)
 
@@ -83,6 +113,8 @@ ffmpeg) inside this folder, and the first transcription downloads the speech mod
 ./reel run jobs/test --client haqq
 ```
 
+(An infographic job runs `script` in place of the first six stages: `./reel script <job> --show`.)
+
 runs every stage built so far and ends by printing the chosen takes and the cut list. Or go one
 stage at a time:
 
@@ -126,7 +158,7 @@ it is `PLATFORM.md`; the shape copies the editing loop of Brody's FounderOS, cut
 | Jobs | every reel, its status, the Studiio verdict, the delivered file | the job folders |
 | Queue | editors and their heartbeat, what is running (stage by stage), up next, waiting for Claude, finished today | `jobs/queue.json`, `jobs/workers/*.json`, `jobs/<job>/worker.json` |
 | Job page | the Beat Board, Approve, "What should change?", the Direction thread, the versions | the job folder, `approvals.json`, `direction/thread.json` |
-| New job | client, title, footage by link or upload, notes, due date → on the queue | writes `jobs/<client>-<slug>/` |
+| New job | talking head or infographic; client, title, style, footage by link or upload (or a script and an optional voice-over), notes, due date → on the queue | writes `jobs/<client>-<slug>/` |
 | Clients | brand, rules, the feedback log, the jobs per client | `clients/<slug>/profile.yaml` |
 | Styles | every style with its version, layouts and components shown as real frames, the words to ask for each, who uses it | `styles/<name>/style.yaml`, the stills of the reels planned with it |
 

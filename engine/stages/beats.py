@@ -52,6 +52,8 @@ def run(job: Job, profile: dict, show: bool = False, planner: str = "auto", forc
     face = job.read_json("face.json") if job.has("face.json") else None
     takes = job.read_json("takes.json") if job.has("takes.json") else None
     style = load_style(job_style(job, profile))
+    if job_kind(job) == "infographic":
+        style = stage_only(style)
 
     candidates = build_candidates(cuts, face, takes, profile)
     job.write_json(CANDIDATES, {"duration": cuts["summary"]["seconds_out"], "candidates": candidates})
@@ -121,6 +123,76 @@ def job_style(job: Job, profile: dict) -> str:
     """The style of this video: the one chosen for the job when the client may use it, else the client's default."""
     chosen = str((job.state.get("meta") or {}).get("style") or "")
     return chosen if chosen and chosen in allowed_styles(profile) else str(get(profile, "style.name", "ios"))
+
+
+def job_kind(job: Job) -> str:
+    """"talking-head" (footage of a person) or "infographic" (a script, no footage)."""
+    return str((job.state.get("meta") or {}).get("kind") or "talking-head")
+
+
+def stage_only(style: dict) -> dict:
+    """The style as an infographic video may use it: only the layouts that show no footage, with no
+    limit on how many beats they take."""
+    stages = {name: {k: v for k, v in l.items() if k != "max_share"}
+              for name, l in (style.get("layouts") or {}).items() if l.get("kind") == "stage"}
+    if not stages:
+        raise JobError(f"The {style.get('title', style.get('name'))} style has no layout without footage, so it cannot make an "
+                       "infographic video. Choose a style that has a stage (Aurora or Explainer).")
+    card = {k: v for k, v in style.items() if not k.startswith("_")}
+    card["layouts"] = stages
+    return {**style, "layouts": stages, "_infographic": True,
+            "_text": yaml.safe_dump(card, sort_keys=False, allow_unicode=True, width=110).strip()}
+
+
+def styles_for(kind: str, names: list[str]) -> list[str]:
+    """Of these styles, the ones a job of this kind can be made in."""
+    if kind != "infographic":
+        return list(names)
+    out, first = [], []
+    for n in names:
+        try:
+            st = load_style(n)
+        except (JobError, OSError):
+            continue
+        if any(l.get("kind") == "stage" for l in (st.get("layouts") or {}).values()):
+            # a style built for infographics (charts, words as the picture) is offered first
+            (first if "infographic" in (st.get("made_for") or []) else out).append(n)
+    return first + out
+
+
+INTRO = {
+    "talking-head": (
+        "You are the editor planning a vertical talking-head reel for a client of Studiio. Your job is the\n"
+        "beat plan: deciding, beat by beat, what the viewer sees on top of the client's footage. The cut is\n"
+        "already made (silences and bad takes are gone) and the words are already timed; you never change\n"
+        "timing — you only group the candidate beats below and choose a layout, a graphic and a caption\n"
+        "style for each.\n\n"
+        "The reel is the client's footage of a person talking to camera, edited in the \"{style_title}\"\n"
+        "style. Everything you pick must come from the style card and the client profile below. You are\n"
+        "planning for a renderer, not for a person: be literal, use only the listed components and props."),
+    "infographic": (
+        "You are the editor planning a vertical infographic video for a client of Studiio. There is no\n"
+        "footage: the frame is a stage, and what the viewer sees is type, numbers and diagrams. The words\n"
+        "below are the script (said by a voice-over, or read on screen at a steady pace) and they are\n"
+        "already timed; you never change timing — you only group the candidate beats below and choose a\n"
+        "layout, a graphic and a caption style for each.\n\n"
+        "The video is made in the \"{style_title}\" style. Use only the layouts, components and props of\n"
+        "the style card below (its planning notes may mention layouts that show a speaker: there is no\n"
+        "speaker in this video, so those do not exist here). You are planning for a renderer, not for a\n"
+        "person: be literal. Every number, name and label in a graphic must come from the script: an\n"
+        "infographic that invents a figure is worse than one with no chart."),
+}
+BEAT_LENGTH = {
+    "talking-head": "one idea per beat, 1.5–4 s usually, never more than 6 s",
+    "infographic": "one idea per beat, 1.5–4 s usually; when the figures of one chart are spread over neighbouring "
+                   "sentences, merge those sentences into one beat of up to {hard_max:g} s — each figure appears on the "
+                   "chart at the moment it is said",
+}
+GRAPHICS_SHARE = {
+    "talking-head": "A beat with nothing to illustrate gets no graphic (40–60% of beats have none).",
+    "infographic": "Show something on most beats: a number, a chart, a diagram or a list wherever the script gives one. "
+                   "A beat with nothing to show is carried by the words.",
+}
 
 
 def layout_shares(style: dict, profile: dict) -> dict[str, float]:
@@ -289,11 +361,22 @@ def layout_rules(style: dict, profile: dict) -> str:
     return " ".join(lines)
 
 
+def _hard_max(profile: dict, style: dict) -> float:
+    """The longest one beat may be. A chart in an infographic may stay through the sentences that give its figures."""
+    if style.get("_infographic"):
+        return float(get(profile, "infographic.hard_max_s", 9.0))
+    return float(get(profile, "beats.hard_max_s", 6.5))
+
+
 def build_prompt(job: Job, profile: dict, style: dict, candidates: list[dict], cuts: dict) -> str:
     template = PROMPT_FILE.read_text(encoding="utf-8")
     broll = [p.name for p in job.optional_files("broll")]
     lines = [f"{c['id']:>3} | {fmt_time(c['start'])}–{fmt_time(c['end'])} ({c['duration']:.1f}s) | {c['text']}" for c in candidates]
+    kind = "infographic" if style.get("_infographic") else "talking-head"
     return template.format(
+        job_intro=INTRO[kind].format(style_title=style.get("title", style.get("name"))),
+        graphics_share=GRAPHICS_SHARE[kind],
+        beat_length=BEAT_LENGTH[kind].format(hard_max=_hard_max(profile, style)),
         style_title=style.get("title", style.get("name")),
         style_card=style["_text"],
         style_planning=str(style.get("planning") or "Use each component for what its description says.").strip(),
@@ -444,7 +527,8 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
     n = len(candidates)
     layouts = style.get("layouts", {})
     components = style.get("components", {})
-    hard_max = float(get(profile, "beats.hard_max_s", 6.5))
+    hard_max = _hard_max(profile, style)
+    infographic = bool(style.get("_infographic"))
     min_s, max_s = float(get(profile, "beats.min_s", 1.5)), float(get(profile, "beats.max_s", 4.0))
     shares = layout_shares(style, profile)
     used: dict[str, int] = {}
@@ -470,7 +554,7 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
         text_norm = normalize(text)
         if dur > hard_max:
             errors.append(f"beat {i}: {dur:.1f}s is too long (max {hard_max}s) — split it")
-        elif dur > max_s * 1.3 or dur < min_s * 0.6:
+        elif (dur > max_s * 1.3 and not (infographic and b.get("graphic"))) or dur < min_s * 0.6:
             warnings.append(f"beat {i}: {dur:.1f}s is outside the usual {min_s}-{max_s}s")
         if b["layout"] not in layouts:
             errors.append(f"beat {i}: unknown layout '{b['layout']}'")
@@ -496,13 +580,21 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
                     for it in items:
                         if len(str(it).split()) > 4:
                             errors.append(f"beat {i}: list item '{it}' is longer than 4 words")
+                elif comp.get("max_words") is not None:
+                    if total_words > int(comp["max_words"]):
+                        errors.append(f"beat {i}: graphic has {total_words} words; {g['component']} allows {comp['max_words']}")
                 elif total_words > 5 and g["component"] not in ("ios-card", "ios-message", "ios-suggested-edit"):
                     errors.append(f"beat {i}: graphic has {total_words} words; the limit is 5")
                 elif total_words > 12:
                     errors.append(f"beat {i}: graphic has {total_words} words; keep it under 12")
                 for num in number_tokens(" ".join(texts)):
                     if num not in number_tokens(text) and num not in script_numbers:
-                        warnings.append(f"beat {i}: the number '{num}' in the graphic is not said in the video — check it")
+                        if infographic:      # the promise of an infographic: every figure on screen is in the script
+                            errors.append(f"beat {i}: the number '{num}' in the graphic is not in the script")
+                        else:
+                            warnings.append(f"beat {i}: the number '{num}' in the graphic is not said in the video — check it")
+                for problem in _count_problems(g["props"], comp, g["component"]):
+                    errors.append(f"beat {i}: {problem}")
                 if g["component"] == "logo-end-card" and i != len(plan["beats"]):
                     errors.append(f"beat {i}: logo-end-card is only for the last beat")
                 if (g["component"] == "asset" or g["props"].get("file")) and str(g["props"].get("file") or "") not in assets:
@@ -511,7 +603,7 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
         kept = []
         for hw in b.get("highlight_words", []) or []:
             if normalize(hw) and normalize(hw) in text_norm:
-                kept.append(hw)
+                kept += [w for w in str(hw).split() if normalize(w)] if len(str(hw).split()) > 1 else [hw]
             else:
                 warnings.append(f"beat {i}: highlight word '{hw}' is not in the beat text; dropped")
         b["highlight_words"] = kept
@@ -526,7 +618,7 @@ def validate(plan: dict, candidates: list[dict], style: dict, profile: dict, job
     for lname, limit in shares.items():
         if total and used.get(lname, 0) / total > limit + 0.05:
             warnings.append(f"{lname} layout on {used.get(lname, 0) / total:.0%} of beats; the limit is {limit:.0%}")
-    if total and with_graphic / total > 0.75:
+    if total and with_graphic / total > 0.75 and not infographic:
         warnings.append(f"graphics on {with_graphic / total:.0%} of beats — probably too busy")
     return errors, warnings
 
@@ -548,9 +640,22 @@ def asset_files(job: Job, profile: dict) -> dict[str, Path]:
     return out
 
 
-def validate_graphic(style: dict, layout: str, g: dict, assets: dict[str, Path], is_last: bool) -> list[str]:
+def said_numbers(beats: dict) -> set[str]:
+    """Every number said in the video, as the checks compare them."""
+    return set(number_tokens(" ".join(str(w.get("w", "")) for b in beats.get("beats", []) for w in b.get("words", []))))
+
+
+def style_of(job: Job, beats: dict | None, profile: dict) -> dict:
+    """The style a job's beats are in, as that job may use it (an infographic: only the layouts without footage)."""
+    style = load_style(str((beats or {}).get("style") or get(profile, "style.name", "ios")))
+    return stage_only(style) if job_kind(job) == "infographic" else style
+
+
+def validate_graphic(style: dict, layout: str, g: dict, assets: dict[str, Path], is_last: bool,
+                     said: set[str] | None = None) -> list[str]:
     """Problems with one graphic against the style: used by revise and the live editor (the planner has
-    its own pass over whole plans). Normalises props in place."""
+    its own pass over whole plans). Normalises props in place. In an infographic every number in a
+    graphic has to be in the script (said: the numbers of the script)."""
     comps = style.get("components", {})
     layouts = style.get("layouts", {})
     if not isinstance(g, dict):
@@ -580,10 +685,18 @@ def validate_graphic(style: dict, layout: str, g: dict, assets: dict[str, Path],
         for it in items:
             if len(str(it).split()) > 4:
                 errors.append(f"list item '{it}' is longer than 4 words")
+    elif comp.get("max_words") is not None:
+        if total_words > int(comp["max_words"]):
+            errors.append(f"graphic has {total_words} words; {g['component']} allows {comp['max_words']}")
     elif total_words > 5 and g["component"] not in ("ios-card", "ios-message", "ios-suggested-edit"):
         errors.append(f"graphic has {total_words} words; the limit is 5")
     elif total_words > 12:
         errors.append(f"graphic has {total_words} words; keep it under 12")
+    errors += _count_problems(props, comp, g["component"])
+    if style.get("_infographic") and said is not None:
+        for num in number_tokens(" ".join(texts)):
+            if num not in said:
+                errors.append(f"the number '{num}' is not in the script; an infographic shows only figures the script gives")
     if g["component"] == "logo-end-card" and not is_last:
         errors.append("logo-end-card is only for the last beat")
     if g["component"] == "asset" or props.get("file"):      # a file named in a graphic must be the client's own
@@ -591,6 +704,22 @@ def validate_graphic(style: dict, layout: str, g: dict, assets: dict[str, Path],
         if name not in assets:
             errors.append(f"file '{name}' is not among the client's visuals (available: {', '.join(assets) or 'none'})")
     return errors
+
+
+def _count_problems(props: dict, comp: dict, name: str) -> list[str]:
+    """A component may say how many entries one of its lists takes (count: {field, min, max})."""
+    rule = comp.get("count")
+    if not rule:
+        return []
+    entries = props.get(rule["field"])
+    n = len(entries) if isinstance(entries, list) else 0
+    if not (int(rule["min"]) <= n <= int(rule["max"])):
+        span = str(rule["min"]) if rule["min"] == rule["max"] else f"{rule['min']}-{rule['max']}"
+        return [f"{name} needs {span} {rule['field']}, has {n}"]
+    if any(not isinstance(e, dict) or not str(e.get("label") or "").strip() or not str(e.get("value") or "").strip() for e in entries) \
+            and "label" in str((comp.get("props") or {}).get(rule["field"]) or ""):
+        return [f"every entry of {name}.{rule['field']} needs a label and a value"]
+    return []
 
 
 def _graphic_texts(props: dict, comp: dict) -> list[str]:
@@ -725,7 +854,10 @@ def graphic_copy(g: dict | None) -> str:
         return f"{p.get('title', '')}" + (f" ({rows})" if rows else "")
     if comp == "ios-toggle":
         return f"{p.get('label', '')} — {p.get('state', '')}"
-    return " ".join(str(p.get(k, "")) for k in ("text", "cta") if p.get(k))
+    rows = next((v for v in p.values() if isinstance(v, list) and v and isinstance(v[0], dict) and "label" in v[0]), None)
+    if rows:
+        return (f"{p['title']}: " if p.get("title") else "") + " · ".join(f"{r.get('label', '')} {r.get('value', '')}".strip() for r in rows)
+    return " ".join(str(p.get(k, "")) for k in ("text", "value", "label", "cta") if p.get(k))
 
 
 def thumbnails(job: Job, beats: list[dict]) -> int:
@@ -764,7 +896,9 @@ def graphic_line(g: dict | None) -> str:
     elif comp == "ios-card":
         body = str(p.get("title", ""))
     else:
-        body = " ".join(str(p.get(k, "")) for k in ("text", "title", "body", "value", "label", "cta") if p.get(k))
+        rows = next((v for v in p.values() if isinstance(v, list) and v and isinstance(v[0], dict) and "label" in v[0]), None)
+        body = " · ".join(f"{r.get('label', '')} {r.get('value', '')}".strip() for r in rows) if rows else \
+            " ".join(str(p.get(k, "")) for k in ("text", "title", "body", "value", "label", "cta") if p.get(k))
     return f"{comp} “{preview(body, 40)}” ({g.get('anchor', '')})"
 
 

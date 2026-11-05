@@ -78,6 +78,26 @@ only good `highlight_words`, and `screen` shows one of the client's own product 
 that says `requires_graphic` always gets a component. Never plan a `screen` or `asset` without a
 file from the client visuals list.
 
+## Infographic jobs
+
+A job with `meta.kind: infographic` has no footage: `script.md` (required) and an optional
+`voiceover/<file>`. `./reel script <job>` replaces stages 1 to 6 (it times the words from the
+voice-over, or at a reading pace when there is none) and `./reel run` picks it by itself. The
+beat-plan request then says "infographic" at the top and lists only the layouts without footage.
+When planning one:
+
+- Show something on most beats; the words alone carry a beat only when the script gives nothing to
+  show. Prefer `bars` for a few things compared, `donut` for one share, `versus` for two numbers
+  against each other, `stat` for one number, `flow` for steps.
+- Every number, name and label in a graphic must be in the script. A number that is not is an
+  error, not a warning. Never round, convert or add a figure.
+- When one chart's figures are spread over neighbouring sentences, merge those sentences into one
+  beat (up to 9 s). Each figure appears when it is said, so write values the way the script says
+  them ("40%", "9 hours").
+- No layout with a speaker exists; `set_layout` to one is refused in comments too.
+- A script-only job with no music ends as "review: silent" in the quality check. That is the
+  honest result; say so, do not call it a pass.
+
 ## Writing the beat plan (stage 7) — this is Claude's job
 
 `./reel beats <job>` writes `<job>/beats-request.md` and stops with "Needs Claude" when no API

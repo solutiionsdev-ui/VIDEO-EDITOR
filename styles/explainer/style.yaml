@@ -13,7 +13,8 @@
 name: explainer
 title: Explainer
 version: 1                 # bumped on every published change; jobs record the version they were planned with
-status: published          # draft | published | retired
+status: published
+made_for: [talking-head, infographic]   # infographic: has charts and a stage where the words are the picture          # draft | published | retired
 reference: "Voice-led product explainers: type that follows the voice, highlight chips, real product screens with a push-in and a cursor, flow chips; studied from a reference reel, nothing from it is reused"
 
 planning: >
@@ -22,7 +23,8 @@ planning: >
   carry the line; they get the chip). Use "stage-dark" for the hook, the problem, a section turn and
   the brand moment. Use "stage-light" whenever a component shows something: one of the client's
   screens → screen (name where to push in with focus); steps, a funnel, a process → flow; a message,
-  a booking, a payment → note; one number → stat. Show the speaker with "face-full" for the opening
+  a booking, a payment → note; one number → stat; a few things compared → bars; one share of a whole
+  → donut; two numbers against each other → versus. Show the speaker with "face-full" for the opening
   line, a personal claim and the closing ask, and with "frame" when a component should sit under the
   face. Change layout often: a new layout every 1–3 beats keeps the pace of an explainer. Never
   invent a screen: screen and asset only with a file from the client visuals list.
@@ -86,6 +88,26 @@ components:
     description: One big number on a solid tile with a short label, counting up. For results, money, percentages, counts.
     props: { value: "e.g. $800,000 or 40%", label: "2-4 words" }
     text_fields: [value, label]
+  bars:
+    description: Two to five labelled bars that grow to their values, the largest in the client's colour. For a few things compared — shares, counts, rates. Every label and value must be in the script.
+    props: { title: "optional, 1-4 words", items: "list of 2-5 {label: 1-3 words, value: a number with its unit, e.g. 48%}" }
+    text_fields: [title, items]
+    max_words: 22
+    count: { field: items, min: 2, max: 5 }
+    still: end
+  donut:
+    description: One percentage as a ring that fills, the number in the middle and a short label under it. For a single share of a whole.
+    props: { value: "a percentage, e.g. 64%", label: "2-5 words" }
+    text_fields: [value, label]
+    max_words: 7
+    still: end
+  versus:
+    description: Two numbers side by side, each with a label, the second in the client's colour. For before and after, short and long, one group against another.
+    props: { sides: "list of exactly 2 {label: 1-3 words, value: a number with its unit}" }
+    text_fields: [sides]
+    max_words: 10
+    count: { field: sides, min: 2, max: 2 }
+    still: end
   asset:
     description: A visual the client supplied that is not a product screen — a chart, a photo — as a card, with an optional short caption. Only files listed as client visuals.
     props: { file: "a file name from the client visuals list", caption: "optional, 1-4 words" }

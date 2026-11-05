@@ -154,8 +154,13 @@ def black_frozen(path: Path, duration: float | None, min_run: float = 0.2,
 
 
 def remix_audio(video_with_audio: Path, base_audio: Path, out: Path, *, total: float, music: Path | None,
-                ducking_db: float, measured: dict) -> Path:
-    """Second loudness pass: linear gain from the measured values, so the result lands on target."""
+                ducking_db: float, measured: dict | None = None, target_lufs: float = -14.0) -> Path:
+    """Second loudness pass, exact: measure the mix before any normalising, then set its level with plain
+    gain. When that gain would push the peaks over the limit (a voice with sharp peaks), a limiter holds
+    them and the gain is corrected once more from what came out, so the result lands on target."""
+    import re
+    import subprocess
+
     inputs = ["-i", str(video_with_audio), "-i", str(base_audio)]
     chain = f"[1:a]aresample=48000,apad=whole_dur={total:.3f},atrim=0:{total:.3f}[v]"
     if music:
@@ -166,10 +171,26 @@ def remix_audio(video_with_audio: Path, base_audio: Path, out: Path, *, total: f
         last = "[mix]"
     else:
         last = "[v]"
-    chain += (f";{last}loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={measured['lufs']}:measured_TP={measured['true_peak']}:"
-              f"measured_LRA={measured.get('lra') or 7}:measured_thresh={measured['lufs'] - 10:.1f}:linear=true[a]")
-    run_ffmpeg(inputs + ["-filter_complex", chain, "-map", "0:v", "-map", "[a]", "-c:v", "copy",
-                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out)])
+
+    proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", "-nostats"] + inputs +
+                          ["-filter_complex", chain + f";{last}ebur128=peak=true:framelog=quiet[a]", "-map", "[a]", "-t", f"{total:.3f}",
+                           "-f", "null", "-"], capture_output=True, text=True)
+    def grab(pattern):
+        m = re.findall(pattern, proc.stderr)
+        return float(m[-1]) if m else None
+    mix_lufs, mix_peak = grab(r"I:\s+(-?\d+(?:\.\d+)?) LUFS"), grab(r"Peak:\s+(-?\d+(?:\.\d+)?) dBFS")
+    if mix_lufs is None or mix_lufs < -60:
+        raise JobError("could not measure the loudness of the mix")
+    gain = target_lufs - mix_lufs
+    limit = (mix_peak if mix_peak is not None else 0.0) + gain > -1.5      # plain gain would leave too little headroom
+    for _ in range(3):
+        level = f"volume={gain:.2f}dB" + (",alimiter=limit=0.75:attack=5:release=80:level=0" if limit else "")
+        run_ffmpeg(inputs + ["-filter_complex", chain + f";{last}{level}[a]", "-map", "0:v", "-map", "[a]", "-c:v", "copy",
+                             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out)])
+        got = loudness(out).get("lufs")
+        if not limit or got is None or abs(got - target_lufs) <= 0.4:
+            break
+        gain += target_lufs - got       # the limiter took a little off: give it back
     return out
 
 

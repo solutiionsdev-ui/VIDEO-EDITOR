@@ -96,6 +96,12 @@ style is implied by the job.
   `style.yaml`.
 - One style per reel, chosen on New job from the client's `style.allowed` list; the default is
   the client's usual style. Per-beat mixing was not built, by decision.
+- **Infographic videos** (same day): a job can be a script with no footage. Such a job may only
+  use a style's `stage` layouts, so a style needs at least one to make an infographic; a style
+  says it was built for them with `made_for: [..., infographic]` and is then offered first.
+  Explainer got three charts for this (`bars`, `donut`, `versus`). A component can now set its
+  own `max_words`, a `count` for one of its lists, and `still: end` when it builds through the
+  beat and should be photographed finished.
 - Still to come from this plan: versions pinned per reel, client-owned styles with lock and
   approval, and the draft flow for new styles.
 

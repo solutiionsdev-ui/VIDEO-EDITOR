@@ -46,3 +46,8 @@ ai:
   model: claude-sonnet-5-5   # the planner; use claude-opus-5-5 if Sonnet's plans aren't good enough
   effort: high
   planner: auto              # auto | api | manual — auto uses the API when credentials exist, else Claude Code
+
+infographic:
+  words_per_second: 2.6      # reading pace when a script has no voice-over (about 155 words a minute)
+  hard_max_s: 9.0            # a chart may stay on screen through the sentences that give its figures
+
