@@ -55,6 +55,10 @@ class Renderer:
     def setup(self, spec: dict) -> dict:
         return self._page.evaluate("spec => window.setup(spec)", spec)
 
+    def cues(self) -> list[dict]:
+        """The sounds the beat that was just set up asks for: [{t, name, gain}], t from the beat start."""
+        return self._page.evaluate("() => window.cues()") or []
+
     def seek(self, t: float, footage: Path | None) -> None:
         url = footage.resolve().as_uri() if footage else None
         self._page.evaluate("([t, u]) => window.seek(t, u)", [float(t), url])
@@ -76,8 +80,12 @@ class Renderer:
 
 # -- spec --------------------------------------------------------------------
 
-def brand_spec(profile: dict) -> dict:
-    """Colours, fonts and logos from the client profile, as the page needs them."""
+def brand_spec(profile: dict, style: dict | None = None) -> dict:
+    """Colours, fonts and logos from the client profile, as the page needs them.
+
+    A style may bring its own typeface (type: {family, file} in style.yaml, the file in the style's
+    folder): the look of a style is its type as much as its motion. It is used unless the client's
+    profile keeps its own font everywhere (style.type: client)."""
     brand = profile.get("brand", {}) or {}
     colours = brand.get("colours", {}) or {}
     client_dir = Path(profile["_path"]).parent if profile.get("_path") else None
@@ -102,11 +110,19 @@ def brand_spec(profile: dict) -> dict:
                 faces.append({"url": p.resolve().as_uri(), "weight": weight})
         if not faces:
             faces.append({"url": primary.resolve().as_uri(), "weight": 600})
+    own = (style or {}).get("type") or {}
+    if own.get("family") and own.get("file") and str((profile.get("style") or {}).get("type") or "style") != "client":
+        f = STYLES_DIR / str(style["name"]) / str(own["file"])
+        if f.is_file():
+            family = str(own["family"])
+            faces = [{"url": f.resolve().as_uri(), "weight": str(own.get("weights") or "100 900")}]
     return {
         "primary": str(colours.get("primary") or "#66023C"),
         "secondary": str(colours.get("secondary") or "#0f1a3a"),
         "accent": str(colours.get("accent") or "#ffffff"),
         "font": {"family": family or "Poppins", "faces": faces},
+        "name": str((profile.get("client") or {}).get("name") or ""),
+        "tagline": str(brand.get("tagline") or ""),
         "logo": asset(brand.get("logo")),
         "logo_dark": asset(brand.get("logo_dark")),
         "url": str(brand.get("url") or ""),
@@ -164,7 +180,7 @@ def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last
         "style": {"name": style["name"], "layouts": style.get("layouts", {}), "motion_first_beat_delay": 0.4},
         "style_css": (STYLES_DIR / style["name"] / "components.css").resolve().as_uri(),
         "style_js": style_js.resolve().as_uri() if style_js.is_file() else None,
-        "brand": brand_spec(profile),
+        "brand": brand_spec(profile, style),
         "captions": {
             "size_px": int(caps.get("size_px", 64)),
             "max_words_per_line": int(caps.get("max_words_per_line", 4)),
@@ -179,10 +195,19 @@ def beat_spec(beat: dict, profile: dict, style: dict, *, is_first: bool, is_last
             "is_first": is_first, "is_last": is_last, "hold_widget": False,
             "render": beat.get("render") or {},     # quality-check overrides: anchor, shrink
             "t0": round(float(beat.get("start") or 0.0), 3),   # where the beat sits in the reel, so a style's background moves on across beats
+            "prev_layout": prev_layout, "next_layout": next_layout,   # what the beat comes from and goes to, for transitions
             "flare_in": bool(flare and prev_layout is not None and prev_layout != beat["layout"]),
             "flare_out": bool(flare and next_layout is not None and next_layout != beat["layout"]),
         },
     }
+
+
+def end_card_seconds(style: dict) -> float:
+    """How long the end card stays: a style with a longer logo moment says so (motion.end_card_s)."""
+    try:
+        return float((style.get("motion") or {}).get("end_card_s") or 1.5)
+    except (TypeError, ValueError):
+        return 1.5
 
 
 def end_card_spec(profile: dict, style: dict, duration: float, prev_layout: str | None = None) -> dict:

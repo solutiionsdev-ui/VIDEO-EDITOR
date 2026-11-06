@@ -40,7 +40,7 @@ beat plan, stills, render, quality check, revisions, comments. `./reel run` know
 What is different for an infographic:
 
 - Only styles with a layout that shows no footage can make one (Explainer and Aurora today; iOS
-  cannot). Explainer is offered first: it has the charts (`bars`, `donut`, `versus`) next to
+  cannot). Explainer is offered first: it has the panels for figures (`stats`, `bars`, `flow`, `donut`, `versus`) next to
   `stat`, `flow` and `note`.
 - **Every number on screen has to be in the script.** For a talking head an unsaid number is a
   warning; here it stops the plan, and a comment that asks for an invented figure is refused.
@@ -49,6 +49,32 @@ What is different for an infographic:
 - With no voice-over and no music the quality check says **review: silent**, not pass: add a
   track, or accept a silent video.
 - There is no AI voice. The voice is a recording the client or the editor supplies.
+
+## Motion, type and sound
+
+**Motion.** Every move is a pure function of time, so a still is exactly a frame of the video. The
+renderer carries a small motion kit every style shares (`STUDIIO.util` in `renderer/render.js`):
+springs, eases, a camera over the caption line, measured word and letter positions for typing, and
+`STUDIIO.cue()` to ask for a sound at a moment. A style's own moves live in
+`styles/<name>/components.js`. A style is built by studying its reference frame by frame, at full
+frame rate, for type, proportions and timing; none of a reference's content is reused.
+
+**Type.** A style may bring its own typeface (`type:` in `style.yaml`, the file in the style's
+`fonts/` folder with its licence). Explainer brings Inter (SIL Open Font License). A client that
+must keep its own font everywhere says `style.type: client` in its profile.
+
+**Sound.** The mix is the voice, music under it, and sound effects, set exactly to −14 LUFS
+(`engine/render/compose.py`): the voice is brought to its level first, the music sits
+`music.ducking_db` under it and dips a little more while someone speaks.
+
+- *Music*: a licensed track in the job's `music/` folder (or the client's `music.tracks`) is used
+  when there is one. Otherwise the engine composes a bed itself (`engine/music.py`, four moods,
+  made to the length of the reel, nothing sampled). `music.source: none`, "No music" on New job, or
+  the comment "no music" turns it off.
+- *Sound effects*: styles mark their moves with cues (a change of scene, a count, a click).
+  Effects are **off** by default (`sound.effects: off`). With `sound.effects: library` the files in
+  `assets/sfx/` (one per cue name, see `assets/sfx/README.md`) are played at those cues; a client's
+  `assets/sfx/` wins. `engine` plays sounds the engine synthesises itself (`engine/sound.py`).
 
 ## Quality check and revisions (stages 11 and 12)
 

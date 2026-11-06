@@ -39,7 +39,7 @@
 {% if versions %}<table class="compact wide"><tr><th>version</th><th>rendered</th><th>changes</th><th>quality check</th><th></th></tr>
 {% for v in versions|reverse %}<tr><td class="mono">v{{ v.version }} {% if v.superseded %}<span class="tag">superseded</span>{% else %}<span class="tag violet">current</span>{% endif %}</td>
 <td class="dim">{{ v.rendered|ago }}{% if v.seconds %} · {{ v.seconds }} s to render{% endif %} · {{ v.size_mb }} MB</td>
-<td>{% if v.changes %}{% for c in v.changes %}<div>Beat {{ c.beat }} — {{ c.change }} <span class="dim">← “{{ c.comment }}”</span></div>{% endfor %}{% else %}<span class="dim">first version</span>{% endif %}</td>
+<td>{% if v.changes %}{% for c in v.changes %}<div>{{ ('Beat ' ~ c.beat) if c.beat else 'Whole reel' }} — {{ c.change }} <span class="dim">← “{{ c.comment }}”</span></div>{% endfor %}{% else %}<span class="dim">first version</span>{% endif %}</td>
 <td>{% if v.check %}<span class="tag {{ 'green' if v.check == 'pass' else 'red' if v.check == 'fail' else 'amber' }}">{{ v.check }}</span>{% else %}<span class="dim">not checked</span>{% endif %}</td>
 <td><a class="open" href="/jobs/{{ name }}/files/{{ v.file }}">Open</a></td></tr>{% endfor %}</table>
 {% else %}<p class="dim">No render yet.</p>{% endif %}</section>

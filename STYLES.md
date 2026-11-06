@@ -102,6 +102,21 @@ style is implied by the job.
   Explainer got three charts for this (`bars`, `donut`, `versus`). A component can now set its
   own `max_words`, a `count` for one of its lists, and `still: end` when it builds through the
   beat and should be photographed finished.
+- **Explainer rebuilt to follow its reference closely (2026-11-06).** The first version copied the
+  layout of the reference and not its type or motion, and read as generic. The reference was
+  studied again at full resolution and full frame rate, and the style rebuilt on what was measured:
+  Inter set tight (the reference's typeface, open licence, shipped in `styles/explainer/fonts/`),
+  pure black and pure white stages, light large numerals, hairline panels with long shadows, chips
+  that pop and count, lines that start large and snap back, typed payoff lines, a chain of steps
+  the camera travels along, a scene that ends when its last chip grows into the frame, rings around
+  a dot that lands in the mark. What cannot be the same: the reference is 16:9 and reels are 9:16,
+  so lines wrap and panels stack; and its content (name, screens, footage, wording) is never used.
+- A style can bring its own typeface (`type:`), set the length of its end card
+  (`motion.end_card_s`), keep more words together in one caption block, and let a component arrive
+  just before its first figure is said. A dark brand colour is lifted on black only as far as it
+  needs to read.
+- A demo client (`clients/demo/`, no logo, a placeholder colour) exists for trying styles without
+  touching a real client's brand.
 - Still to come from this plan: versions pinned per reel, client-owned styles with lock and
   approval, and the draft flow for new styles.
 

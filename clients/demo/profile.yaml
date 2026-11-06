@@ -1,0 +1,55 @@
+# Demo client: a neutral brand for trying styles and showing what the engine can do.
+# Not a real client. The colour is a placeholder; there is no logo file, so the end card types the name.
+client:
+  name: Studiio
+  slug: demo
+  contact: ''
+  languages:
+  - en
+  onboarded: '2026-11-06'
+brand:
+  logo: ''
+  logo_dark: ''
+  tagline: Reels made from a script.
+  colours:
+    primary: '#16D34F'
+    secondary: '#0B0B0C'
+    accent: '#FFFFFF'
+  fonts: {}
+  tone: Plain and direct. Short sentences. Sample content is always called a sample.
+style:
+  name: explainer
+  allowed:
+  - explainer
+  - aurora
+  - ios
+captions:
+  font: Inter
+  size_px: 70
+  colour: '#FFFFFF'
+  active_word_colour: '#16D34F'
+  position: lower-third
+  max_words_per_line: 4
+  language_rules: []
+graphics_library: []
+music:
+  moods:
+  - minimal electronic
+  bpm: 100-110
+  tracks: []
+  ducking_db: -18
+format:
+  aspect: '9:16'
+  max_length_s: 60
+  intro: ''
+  outro: logo end card
+  cta: Made from one script
+  safe_zones: instagram
+rules:
+  do:
+  - say plainly when numbers are samples
+  - hook in the first 1-3 seconds; one message per video
+  dont:
+  - never show other companies' names or logos
+  - never invent a figure that is not in the script
+feedback_log: []

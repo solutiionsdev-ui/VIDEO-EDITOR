@@ -16,6 +16,7 @@
   #captions { position: absolute; left: 6%; right: 6%; display: flex; align-items: center; justify-content: center;
               text-align: center; pointer-events: none; }
   #endcard { position: absolute; inset: 0; display: none; }
+  #cam { position: absolute; inset: 0; pointer-events: none; transform-origin: 50% 50%; }   /* a style may move this "camera" */
   #fx { position: absolute; inset: 0; display: none; pointer-events: none; }   /* a style's full-frame effect, e.g. a flare */
   * { box-sizing: border-box; }
 </style>
@@ -25,8 +26,10 @@
   <div id="bg"></div>
   <div id="footage-wrap"><img id="footage" alt=""></div>
   <div id="endcard"></div>
-  <div id="widget-zone"><div id="widget"></div></div>
-  <div id="captions"></div>
+  <div id="cam">
+    <div id="widget-zone"><div id="widget"></div></div>
+    <div id="captions"></div>
+  </div>
   <div id="fx"></div>
 </div>
 <script src="render.js"></script>

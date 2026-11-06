@@ -2,6 +2,7 @@
  *
  * window.setup(spec)          builds the beat: layout, footage frame, widget, captions
  * window.seek(t, footageUrl)  sets every element to its state at time t (seconds from beat start)
+ * window.cues()               the sounds this beat asks for: [{t, name, gain}], t from the beat start
  *
  * No clocks, no transitions: the state at t is a pure function of the spec, so a frame can be
  * rendered in any order and a still is exactly the frame the video will have.
@@ -13,6 +14,37 @@
   const easeOutCubic = (p) => 1 - Math.pow(1 - p, 3);
   const easeOutBack = (p) => { const c1 = 1.25, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
   const prog = (t, start, dur, ease = easeOutCubic) => ease(clamp((t - start) / dur, 0, 1));
+  // ---- the motion kit: every move is a pure function of time
+  const lerp = (a, b, p) => a + (b - a) * p;
+  const easeOutExpo = (p) => (p >= 1 ? 1 : 1 - Math.pow(2, -10 * p));
+  const easeOutQuint = (p) => 1 - Math.pow(1 - p, 5);
+  const easeInCubic = (p) => p * p * p;
+  const easeInOutCubic = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+  // a damped spring from 0 to 1 that starts at t = 0: f swings a second, z damping (1 = no overshoot)
+  const spring = (t, f = 3.2, z = 0.6) => {
+    if (t <= 0) return 0;
+    const w = 2 * Math.PI * f;
+    if (z >= 1) return 1 - Math.exp(-w * t) * (1 + w * t);
+    const wd = w * Math.sqrt(1 - z * z);
+    return 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + (z * w / wd) * Math.sin(wd * t));
+  };
+  // a smooth wander in [-1, 1], the same for the same (t, seed): for floating and breathing
+  const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const drift = (t, seed = 0) => { const i = Math.floor(t), f = t - i, u = f * f * (3 - 2 * f);
+    return lerp(hash(i + seed * 17.3), hash(i + 1 + seed * 17.3), u) * 2 - 1; };
+  const isRTL = (s) => /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(String(s));
+  // "$800,000" or "40%," as prefix, number, suffix, so it can count up
+  const parseNumber = (value) => {
+    const m = String(value ?? "").match(/^([^\d]*)([\d][\d,]*(?:\.\d+)?)([^\d]*)$/);
+    if (!m) return null;
+    const raw = m[2];
+    return { prefix: m[1], suffix: m[3], target: parseFloat(raw.replace(/,/g, "")), decimals: (raw.split(".")[1] || "").length, grouped: raw.includes(",") };
+  };
+  const showNumber = (n, v) => {
+    let s = v.toFixed(n.decimals);
+    if (n.grouped) s = Number(s).toLocaleString("en-US", { minimumFractionDigits: n.decimals, maximumFractionDigits: n.decimals });
+    return n.prefix + s + n.suffix;
+  };
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const norm = (w) => String(w).toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "");
 
@@ -20,16 +52,31 @@
   //   components   {name: (props, spec) => ({html, animate})}   used before the built-in ones
   //   setup(ctx)   build the style's own background and effects for this beat
   //   frame(ctx)   set them at time ctx.t (ctx.T is the time since the start of the reel)
-  //   widget(el, m) place the widget instead of the default slide-up (m: enter 0..1, opacity, fit)
+  //   ready(ctx)   once fonts are in and everything is measured: plan caption moves, ask for sounds
+  //   widget(el, m) place the widget instead of the default slide-up (m: enter 0..1, opacity, fit, t, out)
+  //   caption(line, chunk, t, active, ctx)  move the words of the caption line that is showing
+  //   endcard(ctx) move the end card instead of the default
+  // A sound is asked for with STUDIIO.cue(t, name, gain): t in seconds from the beat start. Inside a
+  // component, STUDIIO.cueW(t, ...) counts t from the moment the widget arrives.
   const STYLES = {};
   window.STUDIIO = {
     style(name, def) { STYLES[name] = def || {}; },
-    util: { clamp, easeOutCubic, easeOutBack, prog, esc, norm },
+    util: { clamp, lerp, easeOutCubic, easeOutBack, easeOutExpo, easeOutQuint, easeInCubic, easeInOutCubic, spring, drift, hash,
+            prog, esc, norm, isRTL, parseNumber, showNumber },
+    cue(t, name, gain = 1) {
+      if (!S.cues || !isFinite(t) || !name) return;
+      S.cues.push({ t: Math.round(Math.max(0, t) * 1000) / 1000, name: String(name), gain: Math.round(clamp(gain, 0, 2) * 100) / 100 });
+    },
+    cueW(t, name, gain = 1) { (S.cuesW = S.cuesW || []).push([t, name, gain]); },      // placed once the widget's arrival is known
   };
+  window.cues = () => (S.cues || []).slice();
+  window.STUDIIO.measureCaptions = () => measureCaptions();     // a style that reshapes a caption line measures it again
   const ctxOf = (t) => {
     const b = S.spec.beat;
     return { spec: S.spec, geo: S.geo, t, T: (b.t0 || 0) + t, duration: b.duration, $,
-             flareIn: !!b.flare_in, flareOut: !!b.flare_out, layoutKind: S.geo ? S.geo.kind : "full" };
+             flareIn: !!b.flare_in, flareOut: !!b.flare_out, layoutKind: S.geo ? S.geo.kind : "full",
+             prev: b.prev_layout || null, next: b.next_layout || null, isFirst: !!b.is_first, isLast: !!b.is_last,
+             chunks: S.chunks, hasWidget: !!S.widget, tIn: S.tIn || 0, fit: S.fit };
   };
 
   // ---------------------------------------------------------------- setup
@@ -37,7 +84,11 @@
     S.spec = spec;
     S.widget = null;
     S.chunks = [];
+    S.cues = [];
+    S.cuesW = [];
+    S.tIn = 0;
     S.footageUrl = null;
+    $("cam").style.transform = "";
     const W = spec.width, H = spec.height;
     const stage = $("stage");
     stage.style.width = W + "px";
@@ -75,9 +126,19 @@
       buildCaptions(spec, geo);
     }
     if (S.style.setup) S.style.setup(ctxOf(0));
+    // every weight of the client's font, loaded before anything is measured: a hidden caption line
+    // does not ask for its font, and a measure taken with the fallback font would be wrong
+    const weights = (spec.brand.font.faces || []).flatMap((f) => (String(f.weight).includes(" ") ? [300, 400, 500, 600, 700] : [f.weight]));    // a variable font: the weights styles use
+    await Promise.all(weights.map((w) => document.fonts.load(`${w} 48px "${spec.brand.font.family}"`).catch(() => {})));
     await document.fonts.ready;
     await Promise.all([...$("widget").querySelectorAll("img")].map((im) => im.decode().catch(() => {})));
+    if (S.widget && S.widget.build) S.widget.animate = S.widget.build($("widget"), spec) || (() => {});
+    (S.cuesW || []).forEach(([t, name, gain]) => window.STUDIIO.cue((S.tIn || 0) + t, name, gain));
+    S.cuesW = [];
     fitWidget(geo);
+    measureCaptions();
+    if (S.style.ready) S.style.ready(ctxOf(0));
+    else defaultCues(spec);
     return geo;
   };
 
@@ -204,25 +265,29 @@
     if (!S.widget) return;
     w.style.transform = "none";
     const maxH = geo.zone.bottom - geo.zone.top - 8;
-    const maxW = geo.W * 0.86;
+    const maxW = w.querySelector("[data-free-x]") ? 1e6 : geo.W * 0.86;     // a component the camera travels along may be wider than the frame
     const h = w.offsetHeight, wd = w.offsetWidth;
-    S.fit = Math.min(1, maxH / Math.max(1, h), maxW / Math.max(1, wd)) * (S.shrink || 1);
-    if (S.fit < 0.999) w.style.transformOrigin = "center center";
+    // a style may let a small component grow into an empty stage (grow: {stage: 1.6}); it never outgrows its zone
+    const grow = (S.style.grow && S.style.grow[geo.kind]) || 1;
+    S.fit = Math.min(grow, maxH / Math.max(1, h), maxW / Math.max(1, wd)) * (S.shrink || 1);
+    w.style.transformOrigin = "center center";
   }
 
   // ---------------------------------------------------------------- widgets
   const COMPONENTS = {};
+  const cueW = (t, name, gain) => window.STUDIIO.cueW(t, name, gain);
 
   function buildWidget(spec, geo) {
     const g = spec.beat.graphic;
     const comp = (S.style.components || {})[g.component] || COMPONENTS[g.component];
     const w = $("widget");
     if (!comp) { w.innerHTML = `<div class="widget w-unknown">${esc(g.component)}</div>`; S.widget = { animate() {} }; return; }
+    S.tIn = spec.beat.is_first ? spec.style.motion_first_beat_delay : 0.1;
     const built = comp(g.props || {}, spec);
+    if (built.arrive != null) S.tIn = Math.max(S.tIn, Number(built.arrive) || 0);     // e.g. just before the first figure is said
     w.innerHTML = built.html;
     w.className = "widget w-" + g.component;
-    S.widget = { animate: built.animate ? built.animate(w, spec) : () => {} };
-    S.tIn = spec.beat.is_first ? spec.style.motion_first_beat_delay : 0.1;
+    S.widget = { animate() {}, build: built.animate || null };      // built once the fonts are in, so it can measure itself
     S.shrink = (spec.beat.render && spec.beat.render.shrink) || 1;   // quality-check fix: make the widget smaller
   }
 
@@ -232,40 +297,51 @@
     const html = `<div class="headline">${words.map((w) =>
       `<span class="hw${hl && norm(w) === hl ? " hl" : ""}">${esc(w)}</span>`).join(" ")}</div>`;
     return { html, animate: (el) => (t) => {
-      el.querySelectorAll(".hw").forEach((s, i) => {
-        const q = prog(t, i * 0.07, 0.35);
-        s.style.opacity = q; s.style.transform = `translateY(${(1 - q) * 22}px)`;
+      el.querySelectorAll(".hw").forEach((s, i) => {       // each word lands with a small bounce
+        const a = t - i * 0.08, sp = spring(a, 3.4, 0.6);
+        s.style.opacity = clamp(a / 0.1, 0, 1); s.style.transform = `translateY(${((1 - sp) * 34).toFixed(2)}px) scale(${(0.92 + 0.08 * sp).toFixed(4)})`;
       });
     } };
   };
 
-  COMPONENTS["ios-notification"] = (p) => ({
-    html: `<div class="notif"><div class="notif-icon"></div><div class="notif-body">
-      <div class="notif-top"><span class="notif-app">${esc(p.app || "Messages")}</span><span class="notif-time">${esc(p.time || "now")}</span></div>
-      <div class="notif-title">${esc(p.title || "")}</div><div class="notif-text">${esc(p.body || "")}</div></div></div>`,
-    animate: () => () => {},
-  });
+  COMPONENTS["ios-notification"] = (p) => {
+    cueW(0.04, "ding", 0.7);
+    return {
+      html: `<div class="notif"><div class="notif-icon"></div><div class="notif-body">
+        <div class="notif-top"><span class="notif-app">${esc(p.app || "Messages")}</span><span class="notif-time">${esc(p.time || "now")}</span></div>
+        <div class="notif-title">${esc(p.title || "")}</div><div class="notif-text">${esc(p.body || "")}</div></div></div>`,
+      animate: (el) => {
+        const icon = el.querySelector(".notif-icon"), text = el.querySelector(".notif-text");
+        return (t) => {                                     // the icon pops, the line follows
+          icon.style.transform = `scale(${(0.6 + 0.4 * spring(t - 0.05, 3.6, 0.5)).toFixed(4)})`;
+          const q = prog(t, 0.2, 0.3); text.style.opacity = q; text.style.transform = `translateY(${((1 - q) * 8).toFixed(2)}px)`;
+        };
+      },
+    };
+  };
 
   COMPONENTS["ios-message"] = (p) => {
     const bubbles = (p.bubbles || []).slice(0, 3);
+    bubbles.forEach((b, i) => cueW(0.05 + i * 0.45, "bloop", 0.6));
     return { html: `<div class="msgs">${bubbles.map((b) =>
       `<div class="bubble ${b.direction === "out" ? "out" : "in"}">${esc(b.text)}</div>`).join("")}</div>`,
       animate: (el) => (t) => {
         el.querySelectorAll(".bubble").forEach((b, i) => {
-          const q = prog(t, 0.05 + i * 0.45, 0.35, easeOutBack);
-          b.style.opacity = clamp(q * 1.5, 0, 1); b.style.transform = `scale(${0.8 + 0.2 * q})`;
+          const a = t - (0.05 + i * 0.45), sp = spring(a, 3.8, 0.52);
+          b.style.opacity = clamp(a / 0.09, 0, 1); b.style.transform = `translateY(${((1 - sp) * 26).toFixed(2)}px) scale(${(0.7 + 0.3 * sp).toFixed(4)})`;
         });
       } };
   };
 
   COMPONENTS["ios-progress"] = (p) => {
     const from = Number(p.from ?? 0), to = Number(p.to ?? 100), unit = p.unit ?? "%";
+    cueW(0.25, "count", 0.6);
     return { html: `<div class="progress"><div class="progress-top"><span class="progress-label">${esc(p.label || "")}</span>
       <span class="progress-value">${from}${esc(unit)}</span></div><div class="progress-track"><div class="progress-fill"></div></div></div>`,
       animate: (el) => {
         const fill = el.querySelector(".progress-fill"), val = el.querySelector(".progress-value");
         return (t) => {
-          const q = prog(t, 0.25, 1.0);
+          const q = prog(t, 0.25, 1.0, easeInOutCubic);
           const v = from + (to - from) * q;
           fill.style.width = clamp(v, 0, 100) + "%";
           val.textContent = Math.round(v) + unit;
@@ -277,6 +353,7 @@
     const value = String(p.value ?? "");
     const m = value.match(/^([^\d]*)([\d][\d,]*(?:\.\d+)?)([^\d]*)$/);
     const trend = p.trend === "up" ? "▲" : p.trend === "down" ? "▼" : "";
+    if (m) cueW(0.15, "count", 0.6);
     return { html: `<div class="stat"><div class="stat-value"><span class="stat-num">${esc(value)}</span>
       ${trend ? `<span class="stat-trend ${esc(p.trend)}">${trend}${esc(p.delta || "")}</span>` : ""}</div>
       <div class="stat-label">${esc(p.label || "")}</div></div>`,
@@ -287,8 +364,10 @@
         const decimals = (raw.split(".")[1] || "").length;
         const target = parseFloat(raw.replace(/,/g, ""));
         const grouped = raw.includes(",");
+        const badge = el.querySelector(".stat-trend");
         return (t) => {
-          const q = prog(t, 0.15, 0.9);
+          const q = prog(t, 0.15, 0.95, easeOutExpo);
+          if (badge) badge.style.transform = `scale(${(0.4 + 0.6 * spring(t - 0.75, 3.8, 0.5)).toFixed(4)})`;     // the trend pops when the count rests
           const v = target * q;
           let s = v.toFixed(decimals);
           if (grouped) s = Number(s).toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -307,10 +386,11 @@
         const rows = el.querySelectorAll(".list-item");
         const d = spec.beat.duration, tIn = spec.beat.is_first ? spec.style.motion_first_beat_delay : 0.1;
         const stagger = clamp((d - tIn - 0.9) / Math.max(1, rows.length), 0.18, 0.55);
+        rows.forEach((r, i) => cueW(0.3 + i * stagger, "tick", 0.55));
         return (t) => rows.forEach((r, i) => {
-          const q = prog(t, 0.3 + i * stagger, 0.3);
-          r.style.opacity = q; r.style.transform = `translateX(${(1 - q) * -18}px)`;
-          const mk = r.querySelector(".mk.check"); if (mk) mk.style.transform = `scale(${0.6 + 0.4 * easeOutBack(q)})`;
+          const a = t - (0.3 + i * stagger), sp = spring(a, 3.4, 0.62);
+          r.style.opacity = clamp(a / 0.1, 0, 1); r.style.transform = `translateX(${((1 - sp) * -30).toFixed(2)}px)`;
+          const mk = r.querySelector(".mk"); if (mk) mk.style.transform = `scale(${(0.3 + 0.7 * spring(a - 0.06, 4, 0.48)).toFixed(4)})`;
         });
       } };
   };
@@ -321,8 +401,8 @@
       animate: (el) => {
         const img = el.querySelector(".asset-img"), c = el.querySelector(".asset-cap");
         return (t) => {
-          const q = prog(t, 0.05, 0.45, easeOutBack);
-          img.style.opacity = clamp(q * 1.4, 0, 1); img.style.transform = `scale(${0.94 + 0.06 * q})`;
+          const sp = spring(t - 0.05, 2.8, 0.6);
+          img.style.opacity = clamp((t - 0.05) / 0.12, 0, 1); img.style.transform = `scale(${(0.9 + 0.1 * sp).toFixed(4)})`;
           if (c) { const q2 = prog(t, 0.45, 0.3); c.style.opacity = q2; c.style.transform = `translateY(${(1 - q2) * 12}px)`; }
         };
       } };
@@ -330,6 +410,7 @@
 
   COMPONENTS["ios-toggle"] = (p) => {
     const on = (p.state || "on") === "on";
+    cueW(0.6, "click", 0.8);
     return { html: `<div class="toggle-row"><span class="toggle-label">${esc(p.label || "")}</span>
       <div class="toggle ${on ? "" : "on"}"><div class="knob"></div></div></div>`,
       animate: (el) => {
@@ -343,10 +424,11 @@
     return { html: `<div class="tcard">${p.eyebrow ? `<div class="eyebrow">${esc(p.eyebrow)}</div>` : ""}
       <div class="tcard-title">${esc(p.title || "")}</div>
       ${rows.map((r) => `<div class="tcard-row"><span class="k">${esc(r.label)}</span><span class="v">${esc(r.value)}</span></div>`).join("")}</div>`,
-      animate: (el) => (t) => el.querySelectorAll(".tcard-row").forEach((r, i) => { const q = prog(t, 0.3 + i * 0.14, 0.3); r.style.opacity = q; }) };
+      animate: (el) => (t) => el.querySelectorAll(".tcard-row").forEach((r, i) => {
+        const q = prog(t, 0.3 + i * 0.14, 0.32); r.style.opacity = q; r.style.transform = `translateY(${((1 - q) * 12).toFixed(2)}px)`; }) };
   };
 
-  COMPONENTS["ios-suggested-edit"] = (p) => ({
+  COMPONENTS["ios-suggested-edit"] = (p) => (cueW(0.9, "click", 0.8), {
     html: `<div class="suggest"><div class="eyebrow">Suggested edit</div><div class="suggest-text">${esc(p.text || "")}</div>
       <div class="suggest-actions"><span class="btn-accept">Accept</span><span class="btn-dismiss">Dismiss</span></div></div>`,
     animate: (el) => {
@@ -392,7 +474,7 @@
   // ---------------------------------------------------------------- captions
   function buildCaptions(spec, geo) {
     const words = spec.beat.words || [];
-    const maxWords = spec.captions.max_words_per_line || 4;
+    const maxWords = (S.style.captionWords && S.style.captionWords(spec, geo)) || spec.captions.max_words_per_line || 4;
     const hl = new Set((spec.beat.caption.highlight || []).map(norm).filter(Boolean));
     const chunks = [];
     let cur = [];
@@ -403,16 +485,56 @@
     }
     if (cur.length) chunks.push(cur);
     // A lonely last word joins the previous chunk if that keeps the line short.
-    if (chunks.length > 1 && chunks[chunks.length - 1].length === 1 && chunks[chunks.length - 2].length < maxWords) {
+    if (chunks.length > 1 && chunks[chunks.length - 1].length === 1 && chunks[chunks.length - 2].length <= maxWords) {
       chunks[chunks.length - 2].push(chunks.pop()[0]);
     }
     S.chunks = chunks.map((ws, i) => ({
       start: ws[0].start,
       end: i + 1 < chunks.length ? chunks[i + 1][0].start : spec.beat.duration + 1,
       words: ws,
-      html: ws.map((w, j) => `<span class="cw${hl.has(norm(w.w)) ? " hl" : ""}" data-i="${j}">${esc(w.w)}</span>`).join(" "),
+      html: ws.map((w, j) => `<span class="cw${hl.has(norm(w.w)) ? " hl" : ""}${isRTL(w.w) ? " rtl" : ""}" data-i="${j}"><span class="cwt">${esc(w.w)}</span></span>`).join(" "),
     }));
     $("captions").innerHTML = S.chunks.map((c, i) => `<div class="cap-line" data-c="${i}">${c.html}</div>`).join("");
+  }
+
+  // Where every word of every caption line sits (px inside its own line, before any move), and where
+  // each letter ends inside its word, so a style can move a camera over the words and type them.
+  function measureCaptions() {
+    document.querySelectorAll(".cap-line").forEach((ln, i) => {
+      const c = S.chunks[i];
+      ln.style.transform = "none";
+      ln.style.display = "block";
+      const lr = ln.getBoundingClientRect();
+      c.line = ln;
+      c.size = { w: lr.width, h: lr.height };
+      c.els = [...ln.querySelectorAll(".cw")];
+      const box = (r) => ({ x: r.left - lr.left, y: r.top - lr.top, w: r.width, h: r.height });
+      c.boxes = c.els.map((el) => box(el.getBoundingClientRect()));
+      c.texts = c.els.map((el) => el.firstElementChild);
+      c.tboxes = c.texts.map((el) => box(el.getBoundingClientRect()));
+      c.stops = c.texts.map((el, j) => {       // the share of the word's width shown after 1, 2, … letters
+        const node = el.firstChild, total = Math.max(1, c.tboxes[j].w);
+        if (!node || node.nodeType !== 3) return [1];
+        const letters = [...node.data], out = [];
+        let pos = 0;
+        const range = document.createRange();
+        for (const ch of letters) {
+          pos += ch.length;
+          range.setStart(node, 0); range.setEnd(node, pos);
+          out.push(clamp(range.getBoundingClientRect().width / total, 0, 1));
+        }
+        out[out.length - 1] = 1;
+        return out;
+      });
+      ln.style.display = "none";
+    });
+  }
+
+  // The sounds of a style that has no code of its own: a pop when a widget arrives, air at a change of layout.
+  function defaultCues(spec) {
+    const b = spec.beat;
+    if (S.widget) window.STUDIIO.cue(S.tIn, "pop", 0.8);
+    if (b.flare_out) window.STUDIIO.cue(b.duration, "whoosh", 0.8);
   }
 
   // ---------------------------------------------------------------- time
@@ -424,6 +546,7 @@
       if (logo) { logo.style.opacity = clamp(q * 1.4, 0, 1); logo.style.transform = `scale(${0.86 + 0.14 * q})`; }
       if (cta) cta.style.opacity = prog(t, 0.45, 0.4);
       if (url) url.style.opacity = prog(t, 0.75, 0.4);
+      if (S.style.endcard) S.style.endcard(ctxOf(t));
       if (S.style.frame) S.style.frame(ctxOf(t));
       return;
     }
@@ -433,9 +556,11 @@
       const enter = prog(t, tIn, 0.32, easeOutBack);
       let opacity = clamp(enter * 1.6, 0, 1);
       const exitStart = b.duration - 0.2;
-      if (!b.hold_widget && t > exitStart) opacity *= 1 - clamp((t - exitStart) / 0.2, 0, 1);
+      const out = b.hold_widget ? 0 : clamp((t - exitStart) / 0.2, 0, 1);
+      opacity *= 1 - out;
       if (S.style.widget) {
-        S.style.widget(w, { enter: prog(t, tIn, 0.42), opacity, fit: S.fit, t: Math.max(0, t - tIn) });
+        S.style.widget(w, { enter: prog(t, tIn, 0.42), opacity, fit: S.fit, t: Math.max(0, t - tIn), out, T: (b.t0 || 0) + t, duration: b.duration,
+                            above: (S.geo.zone.top + S.geo.zone.bottom) / 2 < S.geo.H * 0.5 });
       } else {
         w.style.opacity = opacity;
         w.style.transform = `translateY(${(1 - enter) * 28}px) scale(${S.fit * (0.96 + 0.04 * enter)})`;
@@ -451,10 +576,11 @@
       if (!on) return;
       let active = -1;
       c.words.forEach((wd, j) => { if (t >= wd.start) active = j; });
-      ln.querySelectorAll(".cw").forEach((sp, j) => {
+      (c.els || ln.querySelectorAll(".cw")).forEach((sp, j) => {
         sp.classList.toggle("active", j === active);
         sp.classList.toggle("said", j < active);
       });
+      if (S.style.caption) S.style.caption(ln, c, t, active, ctxOf(t));
     });
     if (S.style.frame) S.style.frame(ctxOf(t));
   }

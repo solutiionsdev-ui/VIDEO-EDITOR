@@ -47,6 +47,17 @@ ai:
   effort: high
   planner: auto              # auto | api | manual — auto uses the API when credentials exist, else Claude Code
 
+music:
+  source: engine             # engine: a bed made by the engine when no licensed track is supplied | none
+  ducking_db: -18            # how far the music sits under the voice
+  alone_db: -4               # its level when there is no voice (an infographic made from the script alone)
+
+sound:
+  effects: off               # off | library | engine — the sounds a style asks for at its moves
+                             #   library: the files in assets/sfx/ (and the client's assets/sfx/), one per cue name
+                             #   engine: sounds the engine synthesises itself
+  effects_db: -10            # their level in the mix
+
 infographic:
   words_per_second: 2.6      # reading pace when a script has no voice-over (about 155 words a minute)
   hard_max_s: 9.0            # a chart may stay on screen through the sentences that give its figures

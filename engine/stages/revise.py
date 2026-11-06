@@ -41,11 +41,37 @@ OPS = {
 }
 
 
+# A comment about the sound of the whole reel: what it switches, to what, and the words for the change.
+_OFF = r"\b(no|remove|without|drop|kill|mute|cut|lose|take out|turn off)\b"
+_ON = r"\b(add|bring back|put back|turn on|want|restore)\b"
+_FX = r"\b(sound effects?|sfx|sound fx|effects)\b"
+_SOUND = [
+    (re.compile(rf"{_OFF}[^.]*{_FX}|{_FX}[^.]*\boff\b", re.I), "effects", "off", "no sound effects"),
+    (re.compile(rf"{_ON}[^.]*{_FX}|{_FX}[^.]*\b(on|back)\b", re.I), "effects", "library", "sound effects on (from the sound library)"),
+    (re.compile(rf"{_OFF}[^.]*\bmusic\b|\bmusic\b[^.]*\boff\b", re.I), "music", "none", "no music"),
+    (re.compile(rf"{_ON}[^.]*\bmusic\b|\bmusic\b[^.]*\b(on|back)\b", re.I), "music", "engine", "music on"),
+]
+
+
+def sound_change(text: str) -> tuple[str, object, str] | None:
+    """("music" | "effects", the new value, words for it) when a comment about the whole reel asks to
+    switch the music or the sound effects; None for anything else."""
+    if _BEAT_RE.match(text) or _TIME_RE.match(text):
+        return None
+    for pattern, key, value, words in _SOUND:
+        if pattern.search(text):
+            return key, value, words
+    return None
+
+
 def run(job: Job, profile: dict, comments: list[str], show: bool = False, render: bool = True) -> dict:
     beats = job.read_json("beats.json")
     if not comments and not (job.path / PLAN).is_file():
         raise JobError('Give at least one comment, e.g. reel revise jobs/test "beat 4: captions bigger"')
 
+    sound = [(c, sound_change(c)) for c in comments if sound_change(c)]      # about the whole reel's sound: no beat changes
+    all_comments = comments
+    comments = [c for c in comments if not sound_change(c)]
     parsed = [parse_comment(c, beats) for c in comments]
     changes: list[dict] = []
     unresolved: list[dict] = []
@@ -58,7 +84,7 @@ def run(job: Job, profile: dict, comments: list[str], show: bool = False, render
             unresolved.append(p)
 
     plan_path = job.path / PLAN
-    if unresolved or not comments:
+    if unresolved or (not comments and not sound):
         if plan_path.is_file():   # Claude's answer to a request, or a plan written by the Direction thread
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
             changes.extend(plan.get("changes", []))
@@ -68,10 +94,23 @@ def run(job: Job, profile: dict, comments: list[str], show: bool = False, render
             raise NeedsOperator(
                 f"{len(unresolved)} comment(s) need Claude's reading. Read {job.file(REQUEST)}, write {job.file(PLAN)} "
                 f"and run the same `reel revise` command again.")
-    if not changes:
+    if not changes and not sound:
         raise JobError("Nothing to change.")
 
-    applied, skipped = apply_changes(job, beats, profile, changes)
+    applied, skipped = apply_changes(job, beats, profile, changes) if changes else ([], [])
+    if sound:      # the sound of the whole reel: kept on the job, and a new version is rendered with it
+        if not applied:
+            beats["version"] = int(beats.get("version", 1)) + 1
+        wish = dict((job.state.get("meta") or {}).get("sound") or {})
+        for comment, (key, value, words) in sound:
+            wish[key] = value
+            entry = {"version": beats["version"], "beat": None, "comment": comment, "change": words, "op": "sound"}
+            applied.append(entry)
+            beats.setdefault("changes", []).append(entry)
+        job.state.setdefault("meta", {})["sound"] = wish
+        job.save_state()
+        job.write_json("beats.json", beats)
+    comments = all_comments
     log_entry = {
         "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "comments": comments,
@@ -83,7 +122,7 @@ def run(job: Job, profile: dict, comments: list[str], show: bool = False, render
     log["rounds"].append(log_entry)
     job.write_json(LOG, log)
     for a in applied:
-        job.log(f"  beat {a.get('beat', '—')}: {a['change']}")
+        job.log(f"  beat {a['beat']}: {a['change']}" if a.get("beat") else f"  whole reel: {a['change']}")
     for s in skipped:
         job.log(f"  [yellow]skipped[/]: {s}")
 

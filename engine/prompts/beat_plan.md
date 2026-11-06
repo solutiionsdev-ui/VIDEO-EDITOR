@@ -31,7 +31,9 @@
 7. B-roll. Only files listed under "B-roll available". If none are listed, broll is always null.
    The asset component works the same way: only a file listed under "Client visuals available".
    If none are listed, never use asset.
-8. Music. One mood and tempo for the whole reel, from the client's preferences.
+8. Music. One mood and tempo for the whole reel, from the client's preferences. When the client
+   supplies no track the engine makes the bed itself, in one of four moods: name the one that fits
+   as the mood — "minimal electronic", "warm ambient", "upbeat" or "cinematic pulse".
 
 # Output
 

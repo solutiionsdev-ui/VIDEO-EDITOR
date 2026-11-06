@@ -19,7 +19,9 @@
 /* the bloom at a change of layout */
 .flare { position: absolute; left: 50%; top: 68%; width: 1300px; height: 1300px; margin: -650px 0 0 -650px; border-radius: 50%;
          background: radial-gradient(closest-side, var(--cream) 0%, var(--cream) 22%, var(--tint) 46%, color-mix(in srgb, var(--accent) 80%, transparent) 68%, transparent 100%); opacity: 0; }
+.flare.top { top: 6%; }      /* the upper lobe of the burst */
 .flare-fill { position: absolute; inset: 0; background: var(--cream); opacity: 0; }
+.gfade { position: absolute; inset: 0; background: #000; opacity: 0; }       /* the reel opens out of black */
 
 /* ---------- footage ---------- */
 #footage-wrap::after { content: ""; position: absolute; inset: 0; pointer-events: none;
@@ -31,6 +33,12 @@
 .widget { background: var(--glass); color: #fff; border-radius: 46px; padding: 36px 48px; border: 1.5px solid var(--rim); max-width: 900px;
           box-shadow: 0 1px 0 rgba(255,255,255,.38) inset, 0 -1px 0 rgba(255,255,255,.06) inset, 0 34px 90px rgba(0,0,0,.42);
           -webkit-backdrop-filter: blur(22px) saturate(1.35); backdrop-filter: blur(22px) saturate(1.35); }
+
+/* light runs across the glass once as it arrives (--sheen goes 0 → 1, set by the style's code) */
+.gpill::after, .gtile::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 38%, rgba(255,255,255,.34) 50%, transparent 62%);
+  transform: translateX(calc((var(--sheen, 0) - 0.5) * 240%)); }
+.gtile { position: relative; }
 
 /* statement: no glass, only type */
 .w-statement { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0 56px; max-width: 980px; text-align: center; }
@@ -49,6 +57,16 @@
                 box-shadow: 0 1px 0 rgba(255,255,255,.42) inset, 0 0 90px color-mix(in srgb, var(--accent) 60%, transparent), 0 30px 80px rgba(0,0,0,.4); }
 .gnum { font-size: 112px; font-weight: 400; letter-spacing: -0.035em; line-height: 1; font-variant-numeric: tabular-nums; color: #fff; white-space: nowrap; }
 .glabel { font-size: 38px; font-weight: 400; color: rgba(255,255,255,.78); letter-spacing: -0.01em; opacity: 0; }
+
+/* on the stage the number is the picture: larger */
+.kind-stage .gstat { width: 940px; gap: 30px; }
+.kind-stage .gstat .gpill { height: 224px; border-radius: 112px; padding: 0 66px; }
+.kind-stage .gnum { font-size: 144px; }
+.kind-stage .glabel { font-size: 52px; }
+.kind-stage .gprog { width: 940px; }
+.kind-stage .gprog .gpill { height: 168px; border-radius: 84px; }
+.kind-stage .gprog .gnum { font-size: 96px; }
+.kind-stage .gprog-label { font-size: 48px; }
 
 /* progress */
 .gprog { width: 860px; display: flex; flex-direction: column; gap: 20px; }

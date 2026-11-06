@@ -167,10 +167,11 @@ def new_job_form(request: Request, client: str = ""):
     return page(request, "new.html", title="New job", crumb="content / new job", nav="new", clients=clients, error=None,
                 formats=_formats(clients), styles=_style_choices(clients), pace=_pace(clients),
                 values={"client": client or (clients[0]["slug"] if clients else ""), "title": "", "footage_url": "",
-                        "notes": "", "due": "", "style": "", "kind": "talking-head", "script": ""})
+                        "notes": "", "due": "", "style": "", "kind": "talking-head", "script": "", "music": "engine"})
 
 
 KINDS = ("talking-head", "infographic")
+MUSIC_EXT = {".mp3", ".wav", ".m4a", ".aac", ".aif", ".aiff"}
 
 
 def _style_choices(clients: list[dict]) -> dict:
@@ -205,12 +206,15 @@ def _formats(clients: list[dict]) -> dict:
 async def create_job(request: Request, client: str = Form(""), title: str = Form(""), footage_url: str = Form(""),
                      notes: str = Form(""), due: str = Form(""), style: str = Form(""), kind: str = Form("talking-head"),
                      script: str = Form(""), files: list[UploadFile] = File(default=[]),
-                     voice: list[UploadFile] = File(default=[])):
+                     voice: list[UploadFile] = File(default=[]), music: str = Form("engine"),
+                     track: list[UploadFile] = File(default=[])):
     clients = ops.list_clients()
     kind = kind if kind in KINDS else "talking-head"
     info = kind == "infographic"
+    music = music if music in ("engine", "file", "none") else "engine"
     values = {"client": client, "title": title, "footage_url": footage_url.strip(), "notes": notes, "due": due, "style": style,
-              "kind": kind, "script": script}
+              "kind": kind, "script": script, "music": music}
+    tracks = [f for f in track if f.filename] if music == "file" else []
     uploads = [] if info else [f for f in files if f.filename]
     voices = [f for f in voice if f.filename] if info else []
     choices = _style_choices(clients)
@@ -223,6 +227,11 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
         return fail("Pick a client.")
     if not title.strip():
         return fail("Give the reel a title.")
+    if music == "file":
+        if len(tracks) != 1:
+            return fail("Add the music track, one file, or choose another kind of music.")
+        if Path(tracks[0].filename).suffix.lower() not in MUSIC_EXT:
+            return fail(f"{tracks[0].filename} is not an audio file the engine accepts ({', '.join(sorted(MUSIC_EXT))}).")
     allowed = [c["name"] for c in choices[client][kind]]
     if info:
         if not script.strip():
@@ -253,6 +262,11 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
         safe = re.sub(r"[^\w.\-]+", "_", Path(f.filename).name)
         with (path / "raw" / safe).open("wb") as out:
             shutil.copyfileobj(f.file, out, 1 << 20)
+    for f in tracks:      # a licensed track for this reel: it takes the place of the engine's own bed
+        (path / "music").mkdir(exist_ok=True)
+        safe = re.sub(r"[^\w.\-]+", "_", Path(f.filename).name)
+        with (path / "music" / safe).open("wb") as out:
+            shutil.copyfileobj(f.file, out, 1 << 20)
     if info:
         (path / "script.md").write_text(script.replace("\r\n", "\n").strip() + "\n", encoding="utf-8")
         for f in voices:
@@ -266,6 +280,7 @@ async def create_job(request: Request, client: str = Form(""), title: str = Form
     job.state["client"] = client
     chosen = style if style in allowed else (allowed[0] if allowed else "")
     job.state["meta"] = {"title": title.strip(), "notes": notes.strip(), "due": due.strip(), "style": chosen, "kind": kind,
+                         "sound": {"music": "none" if music == "none" else "engine"},      # a track in music/ wins over the engine's bed
                          "created_by": "platform"}
     if info:
         job.state["meta"]["voice"] = voices[0].filename if voices else None

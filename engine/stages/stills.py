@@ -15,7 +15,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from ..job import Job, console
 from ..render import compose
-from ..render.driver import Renderer, beat_spec, end_card_spec, layout_kind, neighbours, still_time
+from ..render.driver import Renderer, beat_spec, end_card_seconds, end_card_spec, layout_kind, neighbours, still_time
 from .beats import load_style
 
 OUTPUT = "stills/index.json"
@@ -55,11 +55,13 @@ def run(job: Job, profile: dict, show: bool = False) -> dict:
                           "file": f"stills/{out.name}"})
             progress.advance(task)
         if beats.get("end_card"):
-            spec = end_card_spec(profile, style, END_CARD_SECONDS, prev_layout=beats["beats"][-1]["layout"])
+            END = end_card_seconds(style)
+            spec = end_card_spec(profile, style, END, prev_layout=beats["beats"][-1]["layout"])
             out = stills_dir / "end-card.jpg"
             r.setup(spec)
-            r.frame(1.2, None, out, quality=90)
-            items.append({"id": "end", "name": "End card", "time": beats["duration"] + 1.2, "offset": 1.2, "file": f"stills/{out.name}"})
+            at = max(1.2, END - 0.3)          # the end card as it stands when it has finished arriving
+            r.frame(at, None, out, quality=90)
+            items.append({"id": "end", "name": "End card", "time": beats["duration"] + at, "offset": at, "file": f"stills/{out.name}"})
             progress.advance(task)
     shutil.rmtree(tmp, ignore_errors=True)
 

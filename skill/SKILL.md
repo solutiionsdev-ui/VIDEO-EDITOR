@@ -73,10 +73,16 @@ job) when the client's profile allows it (`style.allowed`), otherwise the client
 and components, with its props, and follow its `planning` advice. The three styles differ in what
 carries a beat: **iOS** floats white cards over the footage; **Aurora** has a `stage` layout with no
 footage, where a statement or one number carries the frame while the voice continues; in
-**Explainer** the spoken words are the big text on a stage, so most stage beats need no component,
-only good `highlight_words`, and `screen` shows one of the client's own product screens. A layout
-that says `requires_graphic` always gets a component. Never plan a `screen` or `asset` without a
-file from the client visuals list.
+**Explainer** the spoken words are the text on a pure black or pure white stage, so most stage
+beats need no component, only good `highlight_words`. In Explainer the highlight decides the look:
+one or two highlight words that sit together become a solid chip (a number in a chip counts up),
+three or more together are set in the colour without a chip; caption style `emphasis` types the
+line letter by letter, so keep it for the hook and the payoff. Its components are panels: `stats`
+(several numbers in a dark band), `stat`, `bars` (rows with a line that fills), `flow` (a chain
+the camera travels along; rates only when they are said), `note`, `donut`, `versus`, `title` (one
+word through the frame, once a reel, on `stage-dark`) and `screen` (the client's own product
+screen). A layout that says `requires_graphic` always gets a component. Never plan a `screen` or
+`asset` without a file from the client visuals list.
 
 ## Infographic jobs
 

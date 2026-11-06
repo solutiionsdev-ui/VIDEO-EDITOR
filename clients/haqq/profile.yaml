@@ -18,9 +18,11 @@ brand:
     primary:
       file: assets/fonts/Poppins-SemiBold.ttf
       licence: SIL Open Font License
-  tone: Confident, clear, lawyer-grade precision without the jargon. Poppins only.
+  tone: Confident, clear, lawyer-grade precision without the jargon. Poppins is the brand font; a style that brings
+    its own typeface (Explainer brings Inter) uses its own.
 style:
   name: ios
+  type: style
   allowed:
   - ios
   - aurora

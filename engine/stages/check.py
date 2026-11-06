@@ -117,6 +117,9 @@ def check_format(video: Path, manifest: dict) -> dict:
 
 def _silent(job: Job, manifest: dict) -> bool:
     """An infographic video made from a script alone, with no music supplied, has nothing to hear."""
+    a = manifest.get("audio")
+    if a:      # what the render mixed: nothing to hear when there is neither a voice nor music
+        return not a.get("voice") and not a.get("music")
     if manifest.get("music") or not job.has("script.json"):
         return False
     return job.read_json("script.json").get("source") == "script"
@@ -278,7 +281,14 @@ def check_clean_cuts(job: Job, cuts: dict) -> dict:
 def check_black_frozen(job: Job, video: Path, beats: dict, manifest: dict, style: dict) -> dict:
     """Black runs on the whole render; frozen runs per beat, on the footage region only."""
     res = compose.black_frozen(video, duration=float(beats["duration"]))
-    stage_spans = [(b["start"], b["end"]) for b in beats["beats"] if layout_kind(style, b["layout"]) == "stage"]
+    stage_spans: list[tuple[float, float]] = []      # stage beats that follow each other are one stretch
+    for b in beats["beats"]:
+        if layout_kind(style, b["layout"]) != "stage":
+            continue
+        if stage_spans and b["start"] - stage_spans[-1][1] < 0.1:
+            stage_spans[-1] = (stage_spans[-1][0], b["end"])
+        else:
+            stage_spans.append((b["start"], b["end"]))
     # a dark stage is the look of a stage beat, not a fault: only black outside those beats counts
     black = [(a, e) for a, e in res["black"] if not any(s - 0.05 <= a and e <= t + 0.05 for s, t in stage_spans)]
     problems = [f"black from {fmt_time(a)} to {fmt_time(b)}" for a, b in black]
@@ -400,9 +410,8 @@ def apply_fixes(job: Job, profile: dict, version: int, result: dict) -> list[dic
         measured = checks["audio_level"].get("measured") or compose.loudness(video)
         if measured.get("lufs") is not None:
             tmp = video.with_name(f"v{version}-remix.mp4")
-            compose.remix_audio(video, job.path / "renders" / "base.mp4", tmp, total=float(manifest["duration"]),
-                                music=compose.find_music(job, profile),
-                                ducking_db=float(get(profile, "music.ducking_db", -18)), measured=measured)
+            compose.remix_audio(video, tmp, job.path, manifest, music=compose.find_music(job, profile),
+                                ducking_db=float(get(profile, "music.ducking_db", -18)))
             tmp.replace(video)
             fixes.append({"check": "audio_level", "what": f"re-mixed the audio from {measured['lufs']:.1f} LUFS with a measured second pass"})
     return fixes

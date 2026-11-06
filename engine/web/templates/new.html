@@ -31,6 +31,13 @@
 <p class="dim" style="margin:6px 0 0;font-size:13px">A recording of this script being read. The video then follows the voice. Without one, the video is silent with captions timed at a reading pace.</p>
 </div>
 
+<div class="label" style="margin-top:22px">Sound</div>
+<div class="row"><div><label class="f">Music</label><select name="music" id="music">
+<option value="engine" {{ 'selected' if values.music == 'engine' else '' }}>Made by the engine, in the mood of the reel</option>
+<option value="file" {{ 'selected' if values.music == 'file' else '' }}>A licensed track I upload</option>
+<option value="none" {{ 'selected' if values.music == 'none' else '' }}>No music</option></select></div>
+<div id="trackbox"><label class="f">Music track</label><input type="file" name="track" accept="audio/*,.mp3,.wav,.m4a,.aac,.aif,.aiff"></div></div>
+<p class="dim" style="margin:6px 0 0;font-size:13px">The music sits under the voice. Sound effects are off until the studio's own effects are in <code>assets/sfx</code>.</p>
 <label class="f">Notes for the edit</label><textarea name="notes" placeholder="Anything the editor should know: what to keep, what to cut, the one message of the video.">{{ values.notes }}</textarea>
 <div class="actions"><button class="btn">Add to the queue</button><a class="btn ghost" href="/">Cancel</a><span class="dim">Captions, colours and rules come from the <a href="/clients">client profile</a>.</span></div>
 </form>
@@ -68,6 +75,9 @@
     info.innerHTML = `${words} words · about ${Math.round(secs)} s without a voice-over` +
       (secs > p.max_s ? ` · <b style="color:var(--bad, #c0392b)">longer than this client's ${Math.round(p.max_s)} s limit</b>` : '');
   }
+  const music = document.getElementById('music'), trackbox = document.getElementById('trackbox');
+  const showTrack = () => { const on = music.value === 'file'; trackbox.style.visibility = on ? '' : 'hidden'; trackbox.querySelector('input').disabled = !on; };
+  music.addEventListener('change', showTrack); showTrack();
   seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { kindInput.value = b.dataset.kind; sel.dataset.current = ''; show(); }));
   script.addEventListener('input', count);
   s.addEventListener('change', () => { sel.dataset.current = ''; fill(); count();

@@ -93,23 +93,96 @@ def concat_videos(parts: list[Path], out: Path) -> Path:
     return out
 
 
-def mix_and_mux(video: Path, base_audio: Path, out: Path, *, total: float, music: Path | None,
-                ducking_db: float = -18, target_lufs: float = -14) -> Path:
-    """Voice (+ music ducked under it), loudness-normalised, muxed with the joined video."""
-    inputs = ["-i", str(video), "-i", str(base_audio)]
-    chain = f"[1:a]aresample=48000,apad=whole_dur={total:.3f},atrim=0:{total:.3f}[v]"
+def _measure(inputs: list[str], chain: str, last: str, total: float) -> tuple[float | None, float | None]:
+    """Integrated loudness (LUFS) and peak (dBFS) of what a filter chain produces at `last`."""
+    import re
+    import subprocess
+
+    proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", "-nostats"] + inputs +
+                          ["-filter_complex", chain + f";{last}ebur128=peak=true:framelog=quiet[a]", "-map", "[a]", "-t", f"{total:.3f}",
+                           "-f", "null", "-"], capture_output=True, text=True)
+
+    def grab(pattern):
+        m = re.findall(pattern, proc.stderr)
+        return float(m[-1]) if m else None
+    return grab(r"I:\s+(-?\d+(?:\.\d+)?) LUFS"), grab(r"Peak:\s+(-?\d+(?:\.\d+)?) dBFS")
+
+
+def _mix_graph(*, total: float, voice: bool, music: Path | None, sfx: Path | None, ducking_db: float,
+               music_db: float, sfx_db: float, music_is_bed: bool, voice_gain_db: float = 0.0) -> tuple[list[str], str, str]:
+    """The extra ffmpeg inputs (after the video and the base audio) and the filter chain up to the
+    mix before its level is set. The voice is input 1, brought to its level first, so the music and
+    the effects sit where they should relative to it; they follow as inputs in that order."""
+    inputs: list[str] = []
+    chain = f"[1:a]aresample=48000,apad=whole_dur={total:.3f},atrim=0:{total:.3f},volume={voice_gain_db:.2f}dB[v0]"
+    parts = ["[v]"]
+    idx = 2
     if music:
         inputs += ["-stream_loop", "-1", "-i", str(music)]
-        chain += (f";[2:a]aresample=48000,atrim=0:{total:.3f},afade=t=out:st={max(0.0, total - 1.5):.3f}:d=1.5,"
-                  f"volume={ducking_db}dB[m];[m][v]sidechaincompress=threshold=0.02:ratio=6:attack=40:release=600[md];"
-                  f"[v][md]amix=inputs=2:normalize=0:duration=first[mix]")
-        last = "[mix]"
+        # a bed made by the engine is already at a known level; a supplied track is brought to it first
+        level = "" if music_is_bed else "loudnorm=I=-15:TP=-2:LRA=11,"
+        m = (f"[{idx}:a]aresample=48000,{level}atrim=0:{total:.3f},"
+             f"afade=t=in:st=0:d=0.4,afade=t=out:st={max(0.0, total - 1.0):.3f}:d=1.0")
+        if voice:      # under the voice: a fixed step down, and a little more whenever someone is speaking
+            chain += (f";[v0]asplit=2[v][vk];{m},volume={ducking_db + 8:.1f}dB[m];"
+                      f"[m][vk]sidechaincompress=threshold=0.03:ratio=2.2:attack=30:release=450[md]")
+        else:          # no voice: the music is what there is to hear
+            chain += f";[v0]anull[v];{m},volume={music_db:.1f}dB[md]"
+        parts.append("[md]")
+        idx += 1
     else:
-        last = "[v]"
-    chain += f";{last}loudnorm=I={target_lufs}:TP=-1.5:LRA=11[a]"
-    run_ffmpeg(inputs + ["-filter_complex", chain, "-map", "0:v", "-map", "[a]", "-c:v", "copy",
-                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out)])
-    return out
+        chain += ";[v0]anull[v]"
+    if sfx:
+        inputs += ["-i", str(sfx)]
+        chain += f";[{idx}:a]aresample=48000,apad=whole_dur={total:.3f},atrim=0:{total:.3f},volume={sfx_db:.1f}dB[fx]"
+        parts.append("[fx]")
+    if len(parts) > 1:
+        chain += f";{''.join(parts)}amix=inputs={len(parts)}:normalize=0:duration=first[mix]"
+        return inputs, chain, "[mix]"
+    return inputs, chain, "[v]"
+
+
+def mix_and_mux(video: Path, base_audio: Path, out: Path, *, total: float, music: Path | None = None,
+                ducking_db: float = -18, sfx: Path | None = None, voice: bool = True, music_db: float = -4,
+                sfx_db: float = -12, music_is_bed: bool = False, target_lufs: float = -14.0) -> dict:
+    """Voice, music and effects mixed, set to the target loudness and muxed with the joined video.
+
+    The level is set exactly: the mix is measured first, then given plain gain. When that gain would
+    push the peaks over the limit (a voice with sharp peaks), a limiter holds them and the gain is
+    corrected from what came out. With nothing but effects (no voice, no music) the level is left
+    as it is: there is no programme to normalise."""
+    base = ["-i", str(video), "-i", str(base_audio)]
+    voice_gain = 0.0
+    if voice:      # the voice first: everything else is placed relative to it
+        v_lufs, _ = _measure(base, f"[1:a]aresample=48000,apad=whole_dur={total:.3f},atrim=0:{total:.3f}[v]", "[v]", total)
+        if v_lufs is not None and v_lufs > -60:
+            voice_gain = target_lufs - v_lufs
+        else:
+            voice = False      # a voice track with nothing on it
+    extra, chain, last = _mix_graph(total=total, voice=voice, music=music, sfx=sfx, ducking_db=ducking_db,
+                                    music_db=music_db, sfx_db=sfx_db, music_is_bed=music_is_bed, voice_gain_db=voice_gain)
+    inputs = base + extra
+
+    def mux(level: str) -> None:
+        run_ffmpeg(inputs + ["-filter_complex", chain + f";{last}{level}[a]", "-map", "0:v", "-map", "[a]", "-c:v", "copy",
+                             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out)])
+
+    if not voice and not music:
+        mux("anull")
+        return {"mix_lufs": None, "gain_db": 0.0, "limited": False, "voice_gain_db": 0.0}
+    mix_lufs, mix_peak = _measure(inputs, chain, last, total)
+    if mix_lufs is None or mix_lufs < -60:
+        mux("anull")
+        return {"mix_lufs": mix_lufs, "gain_db": 0.0, "limited": False, "voice_gain_db": round(voice_gain, 2)}
+    gain = target_lufs - mix_lufs
+    limit = (mix_peak if mix_peak is not None else 0.0) + gain > -1.5      # plain gain would leave too little headroom
+    for _ in range(3):
+        mux(f"volume={gain:.2f}dB" + (",alimiter=limit=0.75:attack=5:release=80:level=0" if limit else ""))
+        got = loudness(out).get("lufs")
+        if not limit or got is None or abs(got - target_lufs) <= 0.4:
+            break
+        gain += target_lufs - got       # the limiter took a little off: give it back
+    return {"mix_lufs": mix_lufs, "gain_db": round(gain, 2), "limited": bool(limit), "voice_gain_db": round(voice_gain, 2)}
 
 
 def loudness(path: Path) -> dict:
@@ -153,45 +226,21 @@ def black_frozen(path: Path, duration: float | None, min_run: float = 0.2,
     return {"black": black, "frozen": frozen}
 
 
-def remix_audio(video_with_audio: Path, base_audio: Path, out: Path, *, total: float, music: Path | None,
-                ducking_db: float, measured: dict | None = None, target_lufs: float = -14.0) -> Path:
-    """Second loudness pass, exact: measure the mix before any normalising, then set its level with plain
-    gain. When that gain would push the peaks over the limit (a voice with sharp peaks), a limiter holds
-    them and the gain is corrected once more from what came out, so the result lands on target."""
-    import re
-    import subprocess
+def remix_audio(video_with_audio: Path, out: Path, job_dir: Path, manifest: dict, *, music: Path | None = None,
+                ducking_db: float = -18) -> dict:
+    """Mix a rendered version again, exactly as its manifest says it was mixed (the quality check's repair)."""
+    a = manifest.get("audio") or {}
 
-    inputs = ["-i", str(video_with_audio), "-i", str(base_audio)]
-    chain = f"[1:a]aresample=48000,apad=whole_dur={total:.3f},atrim=0:{total:.3f}[v]"
-    if music:
-        inputs += ["-stream_loop", "-1", "-i", str(music)]
-        chain += (f";[2:a]aresample=48000,atrim=0:{total:.3f},afade=t=out:st={max(0.0, total - 1.5):.3f}:d=1.5,"
-                  f"volume={ducking_db}dB[m];[m][v]sidechaincompress=threshold=0.02:ratio=6:attack=40:release=600[md];"
-                  f"[v][md]amix=inputs=2:normalize=0:duration=first[mix]")
-        last = "[mix]"
-    else:
-        last = "[v]"
-
-    proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", "-nostats"] + inputs +
-                          ["-filter_complex", chain + f";{last}ebur128=peak=true:framelog=quiet[a]", "-map", "[a]", "-t", f"{total:.3f}",
-                           "-f", "null", "-"], capture_output=True, text=True)
-    def grab(pattern):
-        m = re.findall(pattern, proc.stderr)
-        return float(m[-1]) if m else None
-    mix_lufs, mix_peak = grab(r"I:\s+(-?\d+(?:\.\d+)?) LUFS"), grab(r"Peak:\s+(-?\d+(?:\.\d+)?) dBFS")
-    if mix_lufs is None or mix_lufs < -60:
-        raise JobError("could not measure the loudness of the mix")
-    gain = target_lufs - mix_lufs
-    limit = (mix_peak if mix_peak is not None else 0.0) + gain > -1.5      # plain gain would leave too little headroom
-    for _ in range(3):
-        level = f"volume={gain:.2f}dB" + (",alimiter=limit=0.75:attack=5:release=80:level=0" if limit else "")
-        run_ffmpeg(inputs + ["-filter_complex", chain + f";{last}{level}[a]", "-map", "0:v", "-map", "[a]", "-c:v", "copy",
-                             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-shortest", "-movflags", "+faststart", str(out)])
-        got = loudness(out).get("lufs")
-        if not limit or got is None or abs(got - target_lufs) <= 0.4:
-            break
-        gain += target_lufs - got       # the limiter took a little off: give it back
-    return out
+    def path(rel):
+        if not rel:
+            return None
+        p = Path(rel)
+        p = p if p.is_absolute() else job_dir / p
+        return p if p.is_file() else None
+    return mix_and_mux(video_with_audio, job_dir / "renders" / "base.mp4", out, total=float(manifest["duration"]),
+                       music=path(a.get("music")) if a else music, ducking_db=float(a.get("ducking_db", ducking_db)),
+                       sfx=path(a.get("sfx")), voice=bool(a.get("voice", True)), music_db=float(a.get("music_db", -4)),
+                       sfx_db=float(a.get("sfx_db", -12)), music_is_bed=a.get("music_source") == "engine")
 
 
 def find_music(job: Job, profile: dict) -> Path | None:

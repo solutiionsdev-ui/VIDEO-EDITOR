@@ -532,7 +532,7 @@ def try_rules(job: Job, msg: dict, run_stage=None) -> dict | None:
     """A note on one beat that the engine's own rules understand ("captions bigger", "no graphic",
     "show chart.png") is applied at once, without Claude. Returns the answer, or None when Claude has
     to read it: a reference attached, a note about the whole reel, or words the rules do not know."""
-    if msg.get("files") or msg.get("ref_url") or not msg.get("text") or not msg.get("beat"):
+    if msg.get("files") or msg.get("ref_url") or not msg.get("text"):
         return None
     beats = _beats(job)
     if not beats:
@@ -540,18 +540,23 @@ def try_rules(job: Job, msg: dict, run_stage=None) -> dict | None:
     profile = load_profile(job.state.get("client"))
     assets = beats_stage.asset_files(job, profile)
     lines = [ln.strip() for ln in msg["text"].splitlines() if ln.strip()]
-    comments = [ln if (revise_stage._BEAT_RE.match(ln) or revise_stage._TIME_RE.match(ln)) else f"beat {msg['beat']}: {ln}"
-                for ln in lines]
-    for c in comments:
-        if revise_stage.interpret(revise_stage.parse_comment(c, beats), beats, profile, assets) is None:
+    if not msg.get("beat"):      # about the whole reel: only the sound switches are plain enough for a rule
+        if not lines or any(revise_stage.sound_change(ln) is None for ln in lines):
             return None
+        comments = lines
+    else:
+        comments = [ln if (revise_stage._BEAT_RE.match(ln) or revise_stage._TIME_RE.match(ln)) else f"beat {msg['beat']}: {ln}"
+                    for ln in lines]
+        for c in comments:
+            if revise_stage.interpret(revise_stage.parse_comment(c, beats), beats, profile, assets) is None:
+                return None
     run_stage = run_stage or (lambda stage, extra=(): _run_stage(job, stage, list(extra)))
     before = (_latest(job) or {}).get("version", 0)
     _set_live(job, "applying it with the engine's own rules", target=msg["id"], did=[])
     code = run_stage("revise", comments)
     v = _latest(job)
     last = ((ops.read_json(job.path / revise_stage.LOG, {}) or {}).get("rounds") or [{}])[-1]
-    applied = [f"beat {a.get('beat')}: {a.get('change')}" for a in last.get("applied", [])]
+    applied = [f"beat {a.get('beat')}: {a.get('change')}" if a.get("beat") else f"whole reel: {a.get('change')}" for a in last.get("applied", [])]
     skipped = list(last.get("skipped", []))
     if code not in (0, 5):
         _set_live(job, None)

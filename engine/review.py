@@ -179,14 +179,31 @@ def _badge(text: str, kind: str) -> str:
     return f'<span class="badge {kind}">{esc(text)}</span>'
 
 
+def _sound_line(job: Job, beats: dict) -> str:
+    """What the reel sounds like: from the latest render when there is one, else what the plan asks for."""
+    renders = job.path / "renders"
+    manifests = sorted((p for p in renders.glob("v*.json") if p.stem[1:].isdigit()), key=lambda p: int(p.stem[1:])) if renders.is_dir() else []
+    a = None
+    if manifests:
+        try:
+            a = json.loads(manifests[-1].read_text(encoding="utf-8")).get("audio")
+        except ValueError:
+            a = None
+    if a:
+        parts = ["the voice" if a.get("voice") else "no voice"]
+        parts.append(f"music ({a['music_title']})" if a.get("music") else "no music")
+        parts.append(f"{a['effects']} sound effects" if a.get("effects") else "no sound effects")
+        return "Sound: " + ", ".join(parts) + "."
+    m = beats.get("music", {})
+    return f"Music planned: {m.get('mood', '—')}, {m.get('bpm', '—')} bpm, {m.get('energy', '—')} energy."
+
+
 def _hero(job: Job, client_name: str, beats: dict | None, cuts: dict | None, profile: dict) -> str:
     version = beats.get("version", 1) if beats else 1
     title = beats.get("title") if beats else job.name
     lede = ""
     if beats:
-        m = beats.get("music", {})
-        lede = (f"{esc(beats.get('hook', ''))} Music: {esc(m.get('mood', '—'))}, {esc(m.get('bpm', '—'))} bpm, "
-                f"{esc(m.get('energy', '—'))} energy, {esc(m.get('ducking_db'))} dB under the voice."
+        lede = (f"{esc(beats.get('hook', ''))} {esc(_sound_line(job, beats))}"
                 + (" A logo end card closes the reel." if beats.get("end_card") else ""))
     elif cuts:
         lede = "The cut is ready; the beat plan has not been written yet."
@@ -240,7 +257,7 @@ def _changes(beats: dict | None) -> str:
     latest = [c for c in beats["changes"] if c.get("version") == v]
     if not latest:
         return ""
-    items = "".join(f'<li><strong>Beat {c.get("beat", "—")}</strong> — {esc(c.get("change"))} '
+    items = "".join(f'<li><strong>{("Beat " + str(c["beat"])) if c.get("beat") else "Whole reel"}</strong> — {esc(c.get("change"))} '
                     f'<span class="dim">← “{esc(c.get("comment"))}”</span></li>' for c in latest)
     return f'<section id="changes"><h2>Changes since last version <span class="dim">v{v}</span></h2><ul class="changes">{items}</ul></section>'
 

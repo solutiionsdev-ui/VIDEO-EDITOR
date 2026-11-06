@@ -55,7 +55,7 @@ def run(job: Job, profile: dict, show: bool = False, planner: str = "auto", forc
     if job_kind(job) == "infographic":
         style = stage_only(style)
 
-    candidates = build_candidates(cuts, face, takes, profile)
+    candidates = build_candidates(cuts, face, takes, profile, written=job_kind(job) == "infographic")
     job.write_json(CANDIDATES, {"duration": cuts["summary"]["seconds_out"], "candidates": candidates})
     prompt = build_prompt(job, profile, style, candidates, cuts)
     (job.path / REQUEST).write_text(prompt, encoding="utf-8")
@@ -225,8 +225,9 @@ def _strip_comments(text: str) -> str:
 
 # -- candidates --------------------------------------------------------------
 
-def build_candidates(cuts: dict, face: dict | None, takes: dict | None, profile: dict) -> list[dict]:
-    """One candidate per clause, tiling the edited timeline from 0 to its end."""
+def build_candidates(cuts: dict, face: dict | None, takes: dict | None, profile: dict, written: bool = False) -> list[dict]:
+    """One candidate per clause, tiling the edited timeline from 0 to its end. For a written script
+    (an infographic) every sentence is its own candidate, however short: the writer chose them."""
     min_s = float(get(profile, "beats.min_s", 1.5))
     max_s = float(get(profile, "beats.max_s", 4.0))
     duration = float(cuts["summary"]["seconds_out"])
@@ -264,7 +265,7 @@ def build_candidates(cuts: dict, face: dict | None, takes: dict | None, profile:
             close = True
         elif w["w"].rstrip()[-1:] in CLAUSE_PUNCT and length >= min_s:
             close = True
-        elif length >= max_s and nxt is not None:
+        elif length >= max_s and nxt is not None and not written:
             close = True
         if close:
             clauses.append(current)
@@ -275,14 +276,18 @@ def build_candidates(cuts: dict, face: dict | None, takes: dict | None, profile:
     # Fold clauses that are too short into a neighbour.
     merged: list[list[dict]] = []
     for c in clauses:
-        if merged and _clause_len(merged[-1], words, duration) < min_s * 0.6 and _same_segment(merged[-1], c) \
+        if written:
+            merged.append(c)
+        elif merged and _clause_len(merged[-1], words, duration) < min_s * 0.6 and _same_segment(merged[-1], c) \
                 and _clause_len(merged[-1] + c, words, duration) <= max_s * 1.5:
             merged[-1] = merged[-1] + c
         else:
             merged.append(c)
     final: list[list[dict]] = []
     for c in merged:
-        if final and _clause_len(c, words, duration) < min_s * 0.6 and _same_segment(final[-1], c) \
+        if written:
+            final.append(c)
+        elif final and _clause_len(c, words, duration) < min_s * 0.6 and _same_segment(final[-1], c) \
                 and _clause_len(final[-1] + c, words, duration) <= max_s * 1.5:
             final[-1] = final[-1] + c
         else:
